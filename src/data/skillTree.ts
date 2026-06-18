@@ -1,11 +1,28 @@
-import type { SkillTreeData, SkillNode, SkillEdge, WorldItem } from '@/types';
+import type { SkillTreeData, SkillNode, SkillEdge, WorldItem, WorldItems } from '@/types';
 import raw from './skillTree.json';
+import { extraItems } from './extraItems';
 
 export const skillTree = raw as unknown as SkillTreeData;
 
 export const skillNodes: SkillNode[] = skillTree.nodes;
 export const skillEdges: SkillEdge[] = skillTree.edges;
-export const worldItems = skillTree.worldItems;
+
+/**
+ * Merge the base world items from the data file with the expanded `extraItems`
+ * catalog, per category bucket. Existing items are kept and the new ones are
+ * appended; categories present only in `extraItems` (e.g. the new `shields`
+ * bucket) are introduced. This runs before `allWorldItems`/`findItem` are built
+ * so the equipment browser and item lookup see everything.
+ */
+function mergeWorldItems(base: WorldItems, extra: WorldItems): WorldItems {
+  const merged: WorldItems = {};
+  for (const key of new Set([...Object.keys(base), ...Object.keys(extra)])) {
+    merged[key] = [...(base[key] ?? []), ...(extra[key] ?? [])];
+  }
+  return merged;
+}
+
+export const worldItems: WorldItems = mergeWorldItems(skillTree.worldItems, extraItems);
 
 /** All world items flattened across category buckets. */
 export const allWorldItems: WorldItem[] = Object.values(worldItems).flat();

@@ -38,6 +38,13 @@ export {
   type LearnCheck,
 } from './skills';
 
+// Quick Build — auto-allocator
+export {
+  autoBuildCharacter,
+  type Archetype,
+  type AutoBuildOptions,
+} from './autobuild';
+
 // Status effects & durations
 export {
   createStatusEffect,

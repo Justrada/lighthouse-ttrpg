@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { Character, Combatant } from '@/types';
 import { useSessionStore } from '@/store';
 import { useRosterStore } from '@/store';
+import { findNpcTemplate } from '@/data/npcTemplates';
 
 /**
  * Resolve the source {@link Character} for a combatant so its abilities, weapon,
@@ -35,6 +36,10 @@ export function useCombatantCharacter(combatant: Combatant | null | undefined): 
         const fromBase = roster.find((c) => c.id === baseId);
         if (fromBase) return fromBase;
       }
+      // Finally, fall back to a drop-in bestiary template (which lives in
+      // neither party nor roster) so staged foes' abilities/weapon resolve.
+      const fromTemplate = findNpcTemplate(baseId);
+      if (fromTemplate) return fromTemplate;
     }
     return undefined;
   }, [combatant, party, activeCharacter, roster]);

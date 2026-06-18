@@ -8,10 +8,19 @@ import {
   Swords,
   Backpack as BackpackIcon,
   Sparkles,
+  Zap,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useDraftStore, useRosterStore, useUIStore } from '@/store';
-import { PageShell, TopBar, Tabs, Button, IconButton } from '@/components/ui';
-import type { TabItem } from '@/components/ui';
+import {
+  PageShell,
+  TopBar,
+  Tabs,
+  Button,
+  IconButton,
+  SegmentedControl,
+} from '@/components/ui';
+import type { TabItem, SegmentOption } from '@/components/ui';
 import { Wordmark } from '@/components/brand';
 import {
   IdentitySection,
@@ -19,9 +28,11 @@ import {
   SkillTreeSection,
   EquipmentSection,
   LivePreview,
+  QuickBuildPanel,
 } from './forge';
 
 type ForgeTab = 'identity' | 'stats' | 'skills' | 'equipment';
+type ForgeMode = 'quick' | 'advanced';
 
 const TABS: TabItem<ForgeTab>[] = [
   { value: 'identity', label: 'Identity', icon: <User /> },
@@ -30,12 +41,20 @@ const TABS: TabItem<ForgeTab>[] = [
   { value: 'equipment', label: 'Equipment', icon: <BackpackIcon /> },
 ];
 
+const MODES: SegmentOption<ForgeMode>[] = [
+  { value: 'quick', label: 'Quick', icon: <Zap /> },
+  { value: 'advanced', label: 'Advanced', icon: <SlidersHorizontal /> },
+];
+
 export default function ForgeScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
   const draft = useDraftStore((s) => s.draft);
   const pushToast = useUIStore((s) => s.pushToast);
   const [tab, setTab] = useState<ForgeTab>('identity');
+  // New heroes default to the fast Quick path; editing opens straight into the
+  // full Advanced tabs.
+  const [mode, setMode] = useState<ForgeMode>(id ? 'advanced' : 'quick');
 
   // --- Mount: load existing by id, or start fresh ---
   useEffect(() => {
@@ -129,42 +148,54 @@ export default function ForgeScreen() {
         />
       }
     >
-      {/* Title */}
-      <div className="mb-5 flex items-center gap-3">
+      {/* Title + mode switch */}
+      <div className="mb-5 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-2xl text-glow-beam sm:text-3xl">
           Character Forge
         </h1>
         <span className="hidden text-sm text-ink-faint sm:inline">
-          {id ? 'Editing your hero' : 'Forge a new hero'}
+          {mode === 'quick' ? 'Quick build a new hero' : id ? 'Editing your hero' : 'Forge a new hero'}
         </span>
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          options={MODES}
+          size="sm"
+          aria-label="Forge mode"
+          className="ml-auto"
+        />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_1fr]">
-        {/* LEFT — live preview */}
-        <aside className="lg:sticky lg:top-20 lg:self-start">
-          <LivePreview />
-        </aside>
+      {mode === 'quick' ? (
+        <QuickBuildPanel />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_1fr]">
+          {/* LEFT — live preview */}
+          <aside className="lg:sticky lg:top-20 lg:self-start">
+            <LivePreview />
+          </aside>
 
-        {/* RIGHT — working area */}
-        <section className="min-w-0">
-          <div className="lh-panel p-4 sm:p-6">
-            <Tabs
-              value={tab}
-              onChange={setTab}
-              items={TABS}
-              variant="pill"
-              fullWidth
-              aria-label="Forge sections"
-              className="mb-5"
-            />
+          {/* RIGHT — working area */}
+          <section className="min-w-0">
+            <div className="lh-panel p-4 sm:p-6">
+              <Tabs
+                value={tab}
+                onChange={setTab}
+                items={TABS}
+                variant="pill"
+                fullWidth
+                aria-label="Forge sections"
+                className="mb-5"
+              />
 
-            {tab === 'identity' && <IdentitySection />}
-            {tab === 'stats' && <StatsSection />}
-            {tab === 'skills' && <SkillTreeSection />}
-            {tab === 'equipment' && <EquipmentSection />}
-          </div>
-        </section>
-      </div>
+              {tab === 'identity' && <IdentitySection />}
+              {tab === 'stats' && <StatsSection />}
+              {tab === 'skills' && <SkillTreeSection />}
+              {tab === 'equipment' && <EquipmentSection />}
+            </div>
+          </section>
+        </div>
+      )}
     </PageShell>
   );
 }

@@ -19,6 +19,9 @@ import type {
   DiceRollResult,
   AdvantageMode,
 } from '@/types';
+import type { Archetype } from '@/engine';
+
+export type { Archetype };
 
 export interface RosterStore {
   characters: Character[];
@@ -35,6 +38,12 @@ export interface DraftStore {
   derived: DerivedStats | null;
   startNew: () => void;
   editExisting: (character: Character) => void;
+  /**
+   * Auto-generate a complete, editable draft from a name, level, and archetype
+   * (Quick Build). Replaces the current draft via the same derive path as
+   * `startNew`/`editExisting`, so the result is fully editable afterward.
+   */
+  quickBuild: (opts: { name: string; level: number; archetype: Archetype }) => void;
   setName: (name: string) => void;
   setLevel: (level: number) => void;
   changeStat: (stat: 'mind' | 'body' | 'soul', delta: number) => void;

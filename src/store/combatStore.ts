@@ -13,6 +13,7 @@ import { CONDITIONS } from '@/data/constants';
 import { useSessionStore } from './sessionStore';
 import { useRosterStore } from './rosterStore';
 import { useUIStore } from './uiStore';
+import { findNpcTemplate } from '@/data/npcTemplates';
 
 /** Extra internal actions the network router calls (superset of the contract). */
 export interface CombatStoreImpl extends CombatStore {
@@ -59,6 +60,12 @@ function buildCharLookup(): (c: Combatant) => Character | undefined {
       if (p) return p;
       const r = roster.find((x) => x.id === c.characterId);
       if (r) return r;
+      // Bestiary NPCs aren't in the party or roster; their instances carry
+      // synthetic ids like "npc-goblin-thug#2". Strip the suffix and resolve
+      // against the template registry so their abilities/weapon still apply.
+      const baseId = c.characterId.split('#')[0];
+      const template = findNpcTemplate(baseId);
+      if (template) return template;
     }
     if (c.peerId) return party.find((m) => m.peerId === c.peerId)?.character;
     return undefined;

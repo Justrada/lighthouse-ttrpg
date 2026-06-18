@@ -10,6 +10,7 @@ import {
   applyLearn,
   applyUnlearn,
   getStatCost,
+  autoBuildCharacter,
 } from '@/engine';
 import { findItem } from '@/data/skillTree';
 import { useRosterStore } from './rosterStore';
@@ -80,6 +81,12 @@ export const useDraftStore = create<DraftStore>()((set, get) => {
 
     editExisting: (character) => {
       const { derived, budget, draft } = derive(structuredClone(character));
+      set({ draft, derived, budget });
+    },
+
+    quickBuild: ({ name, level, archetype }) => {
+      const built = autoBuildCharacter({ name, level, archetype });
+      const { derived, budget, draft } = derive(built);
       set({ draft, derived, budget });
     },
 

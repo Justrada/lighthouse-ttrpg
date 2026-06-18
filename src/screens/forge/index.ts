@@ -7,3 +7,4 @@ export { EquipmentSection } from './EquipmentSection';
 export { BudgetMeter } from './BudgetMeter';
 export type { BudgetMeterProps } from './BudgetMeter';
 export { LivePreview } from './LivePreview';
+export { QuickBuildPanel } from './QuickBuildPanel';
