@@ -16,7 +16,7 @@ import {
   usePlayerCombatants,
   useNpcCombatants,
 } from '@/store';
-import { CombatBoard, CombatLog, ActionPicker, PhaseBanner } from '../combat';
+import { HexBoard, StagedActions, CombatLog, PhaseBanner } from '../combat';
 import { PartyStatus } from './PartyStatus';
 import { PendingCheckPrompt } from './PendingCheckPrompt';
 
@@ -77,7 +77,15 @@ export function PlayerConsole() {
             </Panel>
 
             <Panel padded>
-              <CombatBoard combat={combat} />
+              <HexBoard
+                activeActorId={myCombatant?.id ?? null}
+                controllable={
+                  combat.phase === 'declare' &&
+                  !!myCombatant &&
+                  !myCombatant.isDead &&
+                  !myCombatant.isUnconscious
+                }
+              />
             </Panel>
 
             {/* Declaration (declare phase) or resolution view */}
@@ -89,13 +97,9 @@ export function PlayerConsole() {
                   </span>
                 </div>
                 <p className="mb-3 text-xs text-ink-muted">
-                  Choose your actions, then lock in. The round resolves once everyone is ready.
+                  Tap the battlefield to stage actions, then lock in. The round resolves once everyone is ready.
                 </p>
-                <ActionPicker
-                  combatant={myCombatant}
-                  character={activeCharacter ?? undefined}
-                  combatants={combat.combatants}
-                />
+                <StagedActions actorId={myCombatant.id} />
               </Panel>
             ) : combat.phase === 'declare' && myCombatant ? (
               <Panel padded>

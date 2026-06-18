@@ -6,13 +6,14 @@ import type {
   CombatState,
   DeclaredAction,
   DiceRollResult,
+  HexCoord,
   LinkedItem,
   ResolvedAction,
   SkillEffect,
   Team,
   WorldItem,
 } from '@/types';
-import { BATTLE_LINES, RANGE_ORDER } from '@/data/constants';
+import { BATTLE_GRID, MOVE_RANGE, RANGE_ORDER, RANGE_TO_HEX_DISTANCE } from '@/data/constants';
 import { findItem, findNode } from '@/data/skillTree';
 import { calculateDerivedStats } from './stats';
 import {
@@ -27,6 +28,15 @@ import {
   tickDurations,
   type RuntimeEffect,
 } from './effects';
+import {
+  closestReachableTo,
+  hexDistance,
+  hexEquals,
+  hexLineDraw,
+  inBounds,
+  stepAway,
+  stepToward,
+} from './hex';
 import type { AdvantageMode } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -122,8 +132,11 @@ function isDefeated(c: Combatant): boolean {
 export interface CreateCombatantOptions {
   team: Team;
   peerId?: string | null;
-  /** Override the starting line; defaults to the team's battle-line start. */
-  line?: number;
+  /**
+   * Starting hex. Defaults to `{ q: 0, r: 0 }`; real placement is assigned by the
+   * caller via {@link deployHexes}.
+   */
+  position?: HexCoord;
   /** Carry current HP/MP/SP from a saved character; defaults to full. */
   currentHP?: number;
   currentMP?: number;
@@ -132,18 +145,17 @@ export interface CreateCombatantOptions {
 
 /**
  * Build a {@link Combatant} from a character. Max resources and AC come from
- * derived stats; current resources default to max unless carried over. The line
- * defaults to the team's start from {@link BATTLE_LINES}. Death saves start
- * zeroed; a character entering at 0 HP starts unconscious — matching the
- * original combat setup.
+ * derived stats; current resources default to max unless carried over. The
+ * position defaults to the origin hex `{ q: 0, r: 0 }`; callers assign real
+ * battlefield placement via {@link deployHexes}. Death saves start zeroed; a
+ * character entering at 0 HP starts unconscious — matching the original setup.
  */
 export function createCombatant(
   character: Character,
   opts: CreateCombatantOptions,
 ): Combatant {
   const derived = calculateDerivedStats(character);
-  const line =
-    opts.line ?? (opts.team === 'player' ? BATTLE_LINES.playerStart : BATTLE_LINES.enemyStart);
+  const position = opts.position ?? { q: 0, r: 0 };
 
   const currentHP = opts.currentHP ?? character.currentHP ?? derived.hp;
   const currentMP = opts.currentMP ?? character.currentMP ?? derived.mp;
@@ -155,7 +167,8 @@ export function createCombatant(
     characterId: character.id,
     name: character.name,
     team: opts.team,
-    line,
+    position,
+    equippedWeaponId: undefined,
     initiativeBonus: derived.initiative,
     maxHP: derived.hp,
     maxMP: derived.mp,
@@ -316,30 +329,23 @@ function advantageFromEffects(combatant: Combatant, rollType: string): Advantage
 // Range & targeting
 // ---------------------------------------------------------------------------
 
-/** Whether `target` is within `range` of `source`, by battle-line distance. */
+/**
+ * Whether `target` is within `range` of `source`, by hex distance. `Self`
+ * resolves by team (any ally counts). Every other band maps through
+ * {@link RANGE_TO_HEX_DISTANCE}: `Melee` is adjacent (distance 1), up to
+ * `Battlefield` (Infinity → always in range). Unknown bands are out of range.
+ */
 export function isTargetInRange(
   source: Combatant,
   target: Combatant | undefined,
   range: string | undefined,
 ): boolean {
   if (!source || !target) return false;
-  const distance = Math.abs(source.line - target.line);
-  switch (range) {
-    case 'Self':
-      return target.team === source.team;
-    case 'Melee':
-      return distance === 0;
-    case 'Near':
-      return distance <= 1;
-    case 'Far':
-      return distance <= 2;
-    case 'Distant':
-      return distance <= 3;
-    case 'Battlefield':
-      return true;
-    default:
-      return false;
-  }
+  if (range === 'Self') return target.team === source.team;
+  const max = range ? RANGE_TO_HEX_DISTANCE[range] : undefined;
+  if (max === undefined) return false;
+  if (max === Infinity) return true;
+  return hexDistance(source.position, target.position) <= max;
 }
 
 /** True when a usable only carries supportive (ally-targeting) effects. */
@@ -353,11 +359,38 @@ function isSupportive(data: UsableData): boolean {
 }
 
 /**
+ * Build the hexes of a line/cone of length `n` projected from `source` through
+ * `primary` and continuing in the same direction. The line begins at `primary`
+ * (the impact point) and steps outward; if it has not yet covered `n` hexes it
+ * keeps stepping away from the source. Returns a deduplicated set of hex keys.
+ */
+function lineHexKeys(source: HexCoord, primary: HexCoord, n: number): Set<string> {
+  const keys = new Set<string>();
+  if (n <= 0) return keys;
+  // The drawn segment from source→primary establishes direction; we want the run
+  // of `n` hexes starting at the primary and extending outward.
+  const seg = hexLineDraw(source, primary);
+  let cursor = primary;
+  let prev = seg.length >= 2 ? seg[seg.length - 2] : source;
+  keys.add(`${cursor.q},${cursor.r}`);
+  while (keys.size < n) {
+    // Step further from `prev` (which trails behind cursor along the line).
+    const next = stepAway(cursor, prev);
+    if (hexEquals(next, cursor)) break;
+    prev = cursor;
+    cursor = next;
+    keys.add(`${cursor.q},${cursor.r}`);
+  }
+  return keys;
+}
+
+/**
  * Expand a primary target into the full set affected by an AOE pattern, ported
- * from `getAOETargets`. Supports "Single Target", "AOE N (N Rows)" (radius =
- * floor(N/2) around the target line), and "Target Line (N Row)". Supportive
- * skills hit allies; offensive skills hit enemies. Defeated combatants and
- * unconscious enemies are skipped.
+ * from `getAOETargets`. Supports "Single Target", "AOE N" (a hex blast of radius
+ * `floor(N/2)` around the primary), and "Target Line (N Row)"/"Line" (a line/cone
+ * of length N from the source through the primary). Supportive skills hit allies;
+ * offensive skills hit enemies. Defeated combatants and unconscious enemies are
+ * skipped.
  */
 export function getAOETargets(
   state: CombatState,
@@ -381,12 +414,13 @@ export function getAOETargets(
     const size = parseInt(aoe.match(/AOE (\d+)/)?.[1] ?? '1', 10);
     const radius = Math.floor(size / 2);
     for (const c of state.combatants) {
-      if (Math.abs(c.line - primary.line) <= radius && eligible(c)) targets.push(c);
+      if (hexDistance(c.position, primary.position) <= radius && eligible(c)) targets.push(c);
     }
-  } else if (aoe.includes('Target Line')) {
-    const lineSize = parseInt(aoe.match(/Target Line \((\d+) Row\)/)?.[1] ?? '1', 10);
+  } else if (aoe.includes('Target Line') || aoe.includes('Line')) {
+    const lineSize = parseInt(aoe.match(/(\d+)/)?.[1] ?? '1', 10);
+    const onLine = lineHexKeys(source.position, primary.position, lineSize);
     for (const c of state.combatants) {
-      if (Math.abs(c.line - primary.line) < lineSize && eligible(c)) targets.push(c);
+      if (onLine.has(`${c.position.q},${c.position.r}`) && eligible(c)) targets.push(c);
     }
   }
 
@@ -399,61 +433,70 @@ export function getAOETargets(
 
 interface MoveOutcome {
   moved: boolean;
-  oldLine: number;
-  newLine: number;
+  from: HexCoord;
+  to: HexCoord;
   blockedReason: 'boundary' | 'already adjacent' | null;
 }
 
 /**
- * Compute a forced move of `target` relative to `source`. "Away From" pushes the
- * target away (random direction if on the same line, away otherwise); "Towards"
- * pulls it toward the source without passing it. Clamped to lines 1..10. Mirrors
- * the original `moveTarget`. Mutates `target.line` on success.
+ * Compute a forced move of `target` relative to `source` along the hex line
+ * between them. "Away From" pushes the target away from the source; "Towards"
+ * pulls it toward the source without passing through it. The shove walks one hex
+ * at a time for up to `distance` steps, stopping early at the grid edge (sets
+ * `blockedReason: 'boundary'`) or before a hex occupied by another living
+ * combatant. A "Towards" target already adjacent to the source cannot be pulled
+ * (`blockedReason: 'already adjacent'`). Mutates `target.position` on success.
  */
 function moveTarget(
+  state: CombatState,
   target: Combatant,
   source: Combatant,
   direction: string | undefined,
   distance: number,
-  rng: Rng,
 ): MoveOutcome {
-  const oldLine = target.line;
-  let newLine = oldLine;
+  const from = { ...target.position };
+
+  const occupied = (h: HexCoord): boolean =>
+    state.combatants.some(
+      (c) => c.id !== target.id && c.id !== source.id && c.currentHP > 0 && hexEquals(c.position, h),
+    );
+
+  if (direction === 'Towards' && hexDistance(target.position, source.position) <= 1) {
+    return { moved: false, from, to: from, blockedReason: 'already adjacent' };
+  }
+
+  let cursor = { ...target.position };
   let blockedReason: MoveOutcome['blockedReason'] = null;
+  let steps = 0;
 
-  if (direction === 'Away From') {
-    if (target.line === source.line) {
-      if (source.line === 1) newLine = target.line + distance;
-      else if (source.line === 10) newLine = target.line - distance;
-      else newLine = target.line + (rng() < 0.5 ? -1 : 1) * distance;
+  for (let i = 0; i < distance; i += 1) {
+    let next: HexCoord;
+    if (direction === 'Towards') {
+      // Stop once adjacent — never pass through the source.
+      if (hexDistance(cursor, source.position) <= 1) break;
+      next = stepToward(cursor, source.position);
     } else {
-      const away = target.line > source.line ? 1 : -1;
-      newLine = target.line + away * distance;
+      // Default / "Away From": move further from the source.
+      next = stepAway(cursor, source.position);
     }
-  } else if (direction === 'Towards') {
-    if (target.line === source.line) {
-      return { moved: false, oldLine, newLine: oldLine, blockedReason: 'already adjacent' };
+    if (hexEquals(next, cursor)) break;
+    if (!inBounds(next, BATTLE_GRID)) {
+      blockedReason = 'boundary';
+      break;
     }
-    const toward = target.line > source.line ? -1 : 1;
-    newLine = target.line + toward * distance;
-    if (toward === 1 && newLine > source.line) newLine = source.line;
-    else if (toward === -1 && newLine < source.line) newLine = source.line;
+    if (occupied(next)) {
+      blockedReason = 'boundary';
+      break;
+    }
+    cursor = next;
+    steps += 1;
   }
 
-  const constrained = Math.max(1, Math.min(10, newLine));
-  if (constrained !== newLine) {
-    if (constrained === oldLine) {
-      return { moved: false, oldLine, newLine: oldLine, blockedReason: 'boundary' };
-    }
-    blockedReason = 'boundary';
+  if (steps === 0) {
+    return { moved: false, from, to: from, blockedReason };
   }
-
-  let moved = false;
-  if (constrained !== oldLine) {
-    target.line = constrained;
-    moved = true;
-  }
-  return { moved, oldLine, newLine: constrained, blockedReason };
+  target.position = cursor;
+  return { moved: true, from, to: cursor, blockedReason };
 }
 
 // ---------------------------------------------------------------------------
@@ -743,7 +786,9 @@ function computeDamage(
 ): number {
   let weaponDamage = 0;
   if (effect.useWeaponDamage) {
-    const weaponId = sourceChar?.inventory?.weapon;
+    // A mid-combat equipment swap (source.equippedWeaponId) overrides the source
+    // character's persisted equipped weapon.
+    const weaponId = source.equippedWeaponId ?? sourceChar?.inventory?.weapon;
     const weapon = weaponId ? findItem(weaponId) : undefined;
     const weaponEffect = weapon?.effects?.find((e) => e.type === 'Apply Damage');
     if (weaponEffect?.additionalDamage) {
@@ -892,10 +937,10 @@ function applyEffect(
         }
       }
       if (apply) {
-        const move = moveTarget(target, source, effect.direction as string, Number(effect.rows) || 0, rng);
+        const move = moveTarget(ctx.state, target, source, effect.direction as string, Number(effect.rows) || 0);
         if (move.moved) {
           const word = effect.direction === 'Away From' ? 'pushed away' : 'pulled closer';
-          pushLog(log, round, `${target.name} is ${word} from line ${move.oldLine} to line ${move.newLine}.`, 'beam');
+          pushLog(log, round, `${target.name} is ${word}.`, 'beam');
           results.push({ kind: 'move', text: `${target.name} ${word}`, targetId: target.id });
         }
       }
@@ -1051,60 +1096,110 @@ export function rollInitiativeForRound(
 // Action resolution
 // ---------------------------------------------------------------------------
 
-/** Resolve a Move action (Advance lowers line, Retreat raises it). */
+/**
+ * A predicate marking hexes blocked for `mover`: any OTHER living combatant
+ * occupies the hex. The mover's own hex is never blocked.
+ */
+function blockedBy(state: CombatState, mover: Combatant): (h: HexCoord) => boolean {
+  return (h: HexCoord) =>
+    state.combatants.some(
+      (c) => c.id !== mover.id && c.currentHP > 0 && hexEquals(c.position, h),
+    );
+}
+
+/**
+ * Resolve a Move action on the hex grid. With an explicit `targetHex` the source
+ * walks toward it (up to {@link MOVE_RANGE} steps, stopping at the closest
+ * reachable open hex). Without one, the legacy labels apply: "Approach" moves
+ * toward the action target and stops adjacent; "Flee"/anything else moves away.
+ */
 function resolveMove(
+  state: CombatState,
   source: Combatant,
   action: DeclaredAction,
   round: number,
   log: CombatLogEntry[],
   results: ActionResult[],
 ): void {
-  // Prefer an explicit target line; otherwise step by label. "Advance" moves
-  // toward the enemy side (lower line numbers), anything else retreats (+1),
-  // matching the original movement convention.
-  let newLine: number;
-  if (typeof action.targetLine === 'number') {
-    newLine = action.targetLine;
-  } else {
-    newLine = source.line + (action.label === 'Advance' ? -1 : 1);
+  const blocked = blockedBy(state, source);
+
+  let goal: HexCoord | undefined = action.targetHex;
+  let stopAdjacent = false;
+  if (!goal) {
+    const ref = find(state, action.targetId);
+    if (action.label === 'Approach' && ref) {
+      goal = ref.position;
+      stopAdjacent = true;
+    } else if (ref) {
+      // Flee / default: aim at a far hex on the opposite side of the reference.
+      const dir = { q: source.position.q - ref.position.q, r: source.position.r - ref.position.r };
+      goal = { q: source.position.q + dir.q * MOVE_RANGE, r: source.position.r + dir.r * MOVE_RANGE };
+    }
   }
-  if (newLine >= 1 && newLine <= 10) {
-    source.line = newLine;
-    pushLog(log, round, `${source.name} moves to line ${source.line}.`, 'beam');
-    results.push({ kind: 'move', text: `${source.name} moves to line ${source.line}`, targetId: source.id });
-  } else {
-    pushLog(log, round, `${source.name} tries to move but is blocked.`, 'muted');
+
+  if (!goal) {
+    pushLog(log, round, `${source.name} holds position.`, 'muted');
+    results.push({ kind: 'info', text: `${source.name} holds position`, targetId: source.id });
+    return;
+  }
+
+  const dest = closestReachableTo(source.position, goal, MOVE_RANGE, blocked, BATTLE_GRID);
+
+  // When approaching a specific combatant, don't end on top of it: if the closest
+  // reachable hex is the target's own hex, fall back toward an adjacent hex.
+  let finalDest = dest;
+  if (stopAdjacent && hexEquals(dest, goal)) {
+    finalDest = source.position;
+  }
+
+  if (hexEquals(finalDest, source.position)) {
+    pushLog(log, round, `${source.name} cannot move any closer.`, 'muted');
     results.push({ kind: 'info', text: `${source.name} is blocked`, targetId: source.id });
+    return;
   }
+
+  source.position = finalDest;
+  pushLog(log, round, `${source.name} moves.`, 'beam');
+  results.push({ kind: 'move', text: `${source.name} moves`, targetId: source.id });
 }
 
-/** Resolve a Flee action (move away from the target, or random if same line). */
+/** Resolve a Flee action: step away from the target up to {@link MOVE_RANGE} hexes. */
 function resolveFlee(
+  state: CombatState,
   source: Combatant,
   target: Combatant | undefined,
   round: number,
   log: CombatLogEntry[],
   results: ActionResult[],
-  rng: Rng,
 ): void {
   if (!target) {
     pushLog(log, round, `${source.name} tries to flee but has no one to flee from.`, 'muted');
     results.push({ kind: 'info', text: `${source.name} cannot flee`, targetId: source.id });
     return;
   }
-  let newLine = source.line;
-  if (source.line === target.line) newLine = source.line + (rng() < 0.5 ? -1 : 1);
-  else if (source.line < target.line) newLine = source.line - 1;
-  else newLine = source.line + 1;
 
-  if (newLine >= 1 && newLine <= 10) {
-    source.line = newLine;
-    pushLog(log, round, `${source.name} flees from ${target.name} to line ${source.line}.`, 'beam');
-    results.push({ kind: 'move', text: `${source.name} flees`, targetId: source.id });
-  } else {
-    pushLog(log, round, `${source.name} tries to flee but is blocked by the battlefield edge.`, 'muted');
+  const blocked = blockedBy(state, source);
+  // Aim at a hex far on the opposite side of the target, then take as many steps
+  // toward it as the move allowance permits.
+  const dir = {
+    q: source.position.q - target.position.q,
+    r: source.position.r - target.position.r,
+  };
+  const farGoal =
+    dir.q === 0 && dir.r === 0
+      ? { q: source.position.q + MOVE_RANGE, r: source.position.r }
+      : { q: source.position.q + dir.q * MOVE_RANGE, r: source.position.r + dir.r * MOVE_RANGE };
+  const dest = closestReachableTo(source.position, farGoal, MOVE_RANGE, blocked, BATTLE_GRID);
+
+  if (hexEquals(dest, source.position)) {
+    pushLog(log, round, `${source.name} tries to flee but is cornered.`, 'muted');
     results.push({ kind: 'info', text: `${source.name} is cornered`, targetId: source.id });
+    return;
   }
+
+  source.position = dest;
+  pushLog(log, round, `${source.name} flees from ${target.name}.`, 'beam');
+  results.push({ kind: 'move', text: `${source.name} flees`, targetId: source.id });
 }
 
 /** Resolve a Guard action (defensive stance giving attackers disadvantage). */
@@ -1334,12 +1429,21 @@ export function resolveAction(
 
   switch (action.actionType) {
     case 'Move':
-      resolveMove(source, action, round, log, results);
+      resolveMove(next, source, action, round, log, results);
       break;
 
     case 'Flee':
-      resolveFlee(source, target, round, log, results, rng);
+      resolveFlee(next, source, target, round, log, results);
       break;
+
+    case 'Change Equipment': {
+      source.equippedWeaponId = action.actionId ?? null;
+      const weapon = action.actionId ? findItem(action.actionId) : undefined;
+      const what = weapon?.name ? `the ${weapon.name}` : 'a different weapon';
+      pushLog(log, round, `${source.name} readies ${what}.`, 'beam');
+      results.push({ kind: 'info', text: `${source.name} swaps equipment`, targetId: source.id });
+      break;
+    }
 
     case 'Guard':
       resolveGuard(source, round, log, results);
@@ -1369,7 +1473,9 @@ export function resolveAction(
     }
 
     case 'Weapon Attack': {
-      const weapon = action.actionId ? findItem(action.actionId) : undefined;
+      // A mid-combat equipment swap overrides the declared weapon id.
+      const weaponId = source.equippedWeaponId ?? action.actionId;
+      const weapon = weaponId ? findItem(weaponId) : undefined;
       if (!weapon) {
         pushLog(log, round, `${source.name} tries to attack, but the weapon wasn't found.`, 'muted');
         break;

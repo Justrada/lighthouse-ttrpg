@@ -2,6 +2,12 @@ import type { ActiveStatusEffect } from './character';
 
 export type Team = 'player' | 'npc';
 
+/** Axial hex coordinate on the battlefield grid. */
+export interface HexCoord {
+  q: number;
+  r: number;
+}
+
 export interface Combatant {
   id: string;
   /** PeerJS connection id for player combatants; null for GM-controlled NPCs. */
@@ -10,8 +16,10 @@ export interface Combatant {
   characterId?: string;
   name: string;
   team: Team;
-  /** Position on the abstract battle line (lower = player side). */
-  line: number;
+  /** Position on the hex battlefield (axial coordinate). */
+  position: HexCoord;
+  /** Weapon swapped to mid-combat; overrides the source character's equipped weapon. */
+  equippedWeaponId?: string | null;
   initiativeBonus: number;
   maxHP: number;
   maxMP: number;
@@ -35,6 +43,7 @@ export type ActionType =
   | 'Use Ability'
   | 'Weapon Attack'
   | 'Use Item'
+  | 'Change Equipment'
   | 'Flee'
   | 'Pass';
 
@@ -46,7 +55,8 @@ export interface DeclaredAction {
   label?: string;
   targetId?: string | null;
   targetIds?: string[];
-  targetLine?: number;
+  /** Destination hex for Move actions. */
+  targetHex?: HexCoord;
   resolved?: boolean;
 }
 

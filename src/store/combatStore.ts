@@ -8,8 +8,8 @@ import type {
   DeclaredAction,
 } from '@/types';
 import type { CombatStore } from './contracts';
-import { resolveRound, processEndOfRound } from '@/engine';
-import { CONDITIONS } from '@/data/constants';
+import { resolveRound, processEndOfRound, deployHexes } from '@/engine';
+import { CONDITIONS, BATTLE_GRID } from '@/data/constants';
 import { useSessionStore } from './sessionStore';
 import { useRosterStore } from './rosterStore';
 import { useUIStore } from './uiStore';
@@ -50,6 +50,33 @@ function broadcast(combat: CombatState) {
   if (isGM()) useSessionStore.getState().send({ type: 'combat_update', payload: { combat } });
 }
 
+/**
+ * Assign starting hex positions to the incoming combatants. Combatants are
+ * grouped by team; each team draws distinct deployment hexes from
+ * {@link deployHexes} (players on the bottom rows, enemies on the top rows) and
+ * the positions are written back in order. This fixes the default `{q:0,r:0}`
+ * collision that occurs when combatants are created without an explicit hex.
+ */
+function placeCombatants(combatants: Combatant[]): Combatant[] {
+  const byTeam: Record<Combatant['team'], Combatant[]> = { player: [], npc: [] };
+  for (const c of combatants) byTeam[c.team].push(c);
+
+  const positionFor = new Map<string, Combatant['position']>();
+  (Object.keys(byTeam) as Combatant['team'][]).forEach((team) => {
+    const team_members = byTeam[team];
+    const hexes = deployHexes(team, team_members.length, BATTLE_GRID);
+    team_members.forEach((c, i) => {
+      const hex = hexes[i];
+      if (hex) positionFor.set(c.id, hex);
+    });
+  });
+
+  return combatants.map((c) => {
+    const hex = positionFor.get(c.id);
+    return hex ? { ...c, position: hex } : c;
+  });
+}
+
 /** Resolve a combatant's source Character for skill scores during resolution. */
 function buildCharLookup(): (c: Combatant) => Character | undefined {
   const party = useSessionStore.getState().party;
@@ -76,12 +103,13 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   combat: emptyCombat(),
 
   startCombat: (combatants) => {
+    const placed = placeCombatants(combatants);
     const combat: CombatState = {
       ...emptyCombat(),
       isActive: true,
       phase: 'declare',
       round: 1,
-      combatants,
+      combatants: placed,
       log: [logEntry(1, '⚔️ Combat begins. Declare your actions.', 'beam')],
     };
     set({ combat });

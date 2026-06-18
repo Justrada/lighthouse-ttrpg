@@ -55,6 +55,28 @@ export {
   type RuntimeEffect,
 } from './effects';
 
+// Hex grid math
+export {
+  hexKey,
+  hexEquals,
+  hexAdd,
+  hexSub,
+  hexNeighbors,
+  hexDistance,
+  hexesInRange,
+  hexLineDraw,
+  stepToward,
+  stepAway,
+  inBounds,
+  gridHexes,
+  deployHexes,
+  hexToPixel,
+  reachableHexes,
+  closestReachableTo,
+  HEX_DIRECTIONS,
+  type GridDims,
+} from './hex';
+
 // Combat
 export {
   createCombatant,

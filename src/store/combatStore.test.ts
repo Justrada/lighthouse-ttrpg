@@ -9,7 +9,7 @@ function mkCombatant(over: Partial<Combatant>): Combatant {
     peerId: null,
     name: 'Combatant',
     team: 'player',
-    line: 4,
+    position: { q: 0, r: 0 },
     initiativeBonus: 0,
     maxHP: 20,
     maxMP: 5,

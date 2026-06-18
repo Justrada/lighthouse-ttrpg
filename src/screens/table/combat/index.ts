@@ -1,14 +1,20 @@
-export { CombatBoard } from './CombatBoard';
-export type { CombatBoardProps } from './CombatBoard';
+export { HexBoard } from './HexBoard';
+export type { HexBoardProps } from './HexBoard';
+
+export { HexTile } from './HexTile';
+export type { HexTileProps, HexTileTint } from './HexTile';
 
 export { CombatantToken } from './CombatantToken';
 export type { CombatantTokenProps } from './CombatantToken';
 
+export { ActionMenu } from './ActionMenu';
+export type { ActionMenuProps, ActionMenuItem } from './ActionMenu';
+
+export { StagedActions } from './StagedActions';
+export type { StagedActionsProps } from './StagedActions';
+
 export { CombatLog } from './CombatLog';
 export type { CombatLogProps } from './CombatLog';
-
-export { ActionPicker } from './ActionPicker';
-export type { ActionPickerProps } from './ActionPicker';
 
 export { PhaseBanner } from './PhaseBanner';
 export type { PhaseBannerProps } from './PhaseBanner';

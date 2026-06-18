@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Swords, Wand2, Dices, Play, Flag, ScrollText, ShieldQuestion } from 'lucide-react';
 import {
@@ -10,9 +10,8 @@ import {
   Spinner,
 } from '@/components/ui';
 import { GlowOrb } from '@/components/atmosphere';
-import { useSessionStore, useCombatStore } from '@/store';
-import type { Combatant } from '@/types';
-import { CombatBoard, CombatLog, PhaseBanner } from '../combat';
+import { useSessionStore, useCombatStore, useNpcCombatants } from '@/store';
+import { HexBoard, StagedActions, CombatLog, PhaseBanner } from '../combat';
 import { PartyPanel } from './PartyPanel';
 import { StartCombatModal } from './StartCombatModal';
 import { RequestCheckModal } from './RequestCheckModal';
@@ -23,19 +22,39 @@ import { NpcActionPanel } from './NpcActionPanel';
 export function GMConsole() {
   const party = useSessionStore((s) => s.party);
   const combat = useCombatStore((s) => s.combat);
+  const lockedActions = useCombatStore((s) => s.combat.lockedActions);
   const allLocked = useCombatStore((s) => s.allLocked);
   const resolveRound = useCombatStore((s) => s.resolveRound);
   const endCombat = useCombatStore((s) => s.endCombat);
+  const npcsAll = useNpcCombatants();
 
   const [startOpen, setStartOpen] = useState(false);
   const [checkOpen, setCheckOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [toolsTarget, setToolsTarget] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
+  // Which NPC the GM is currently ordering on the board.
+  const [orderingId, setOrderingId] = useState<string | null>(null);
 
   const inCombat = combat.isActive;
-  const npcs = combat.combatants.filter((c) => c.team === 'npc' && !c.isDead);
+  // Living NPCs the GM can order (the dead drop off the roster).
+  const npcs = useMemo(() => npcsAll.filter((c) => !c.isDead), [npcsAll]);
   const ready = allLocked();
+
+  // Keep the active actor valid: default to the first foe that still needs to
+  // act (alive, conscious, unlocked), and never leave it pointing at a foe that
+  // has left the fight.
+  useEffect(() => {
+    const orderable = npcs.filter((c) => !c.isUnconscious);
+    const stillValid = orderingId != null && orderable.some((c) => c.id === orderingId);
+    if (stillValid) return;
+    const firstUnlocked = orderable.find((c) => !lockedActions[c.id]);
+    setOrderingId((firstUnlocked ?? orderable[0])?.id ?? null);
+  }, [npcs, lockedActions, orderingId]);
+
+  // Reset the active actor when combat ends so the next fight starts clean.
+  useEffect(() => {
+    if (!inCombat) setOrderingId(null);
+  }, [inCombat]);
 
   // Keep the local "resolving" guard in sync with the store phase.
   useEffect(() => {
@@ -49,10 +68,7 @@ export function GMConsole() {
     setResolving(false);
   };
 
-  const openToolsFor = (c: Combatant) => {
-    setToolsTarget(c.id);
-    setToolsOpen(true);
-  };
+  const orderingNpc = orderingId ? npcs.find((c) => c.id === orderingId) : undefined;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
@@ -112,10 +128,7 @@ export function GMConsole() {
                 variant="secondary"
                 size="sm"
                 leftIcon={<Wand2 className="h-4 w-4" />}
-                onClick={() => {
-                  setToolsTarget(null);
-                  setToolsOpen(true);
-                }}
+                onClick={() => setToolsOpen(true)}
               >
                 GM Tools
               </Button>
@@ -163,18 +176,17 @@ export function GMConsole() {
         ) : (
           <>
             <Panel padded>
-              <CombatBoard
-                combat={combat}
-                selectable
-                selectedId={toolsTarget}
-                onSelect={openToolsFor}
+              <HexBoard
+                activeActorId={orderingId}
+                controllable
+                onSelectActor={setOrderingId}
               />
               <p className="mt-3 text-center text-xs text-ink-faint">
-                Tap any combatant to open GM Tools for them.
+                Tap a foe to choose who you’re ordering, then stage their actions on the field.
               </p>
             </Panel>
 
-            {/* NPC declarations + resolve */}
+            {/* NPC roster + active-foe orders + resolve */}
             <Panel padded>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-ink-faint">
@@ -197,10 +209,29 @@ export function GMConsole() {
                   No foes to command. Lock the heroes in and resolve.
                 </p>
               ) : (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {npcs.map((c) => (
-                    <NpcActionPanel key={c.id} combatant={c} combatants={combat.combatants} />
-                  ))}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+                  {/* Selector: every foe's lock status at a glance */}
+                  <div className="flex flex-col gap-2">
+                    {npcs.map((c) => (
+                      <NpcActionPanel
+                        key={c.id}
+                        combatant={c}
+                        active={c.id === orderingId}
+                        onSelect={setOrderingId}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Staged actions for the foe being ordered */}
+                  <div>
+                    {orderingNpc ? (
+                      <StagedActions actorId={orderingNpc.id} />
+                    ) : (
+                      <p className="py-6 text-center text-sm text-ink-muted">
+                        Select a foe to give orders.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -243,11 +274,7 @@ export function GMConsole() {
       {/* Modals & drawers */}
       <StartCombatModal open={startOpen} onClose={() => setStartOpen(false)} party={party} />
       <RequestCheckModal open={checkOpen} onClose={() => setCheckOpen(false)} party={party} />
-      <GMToolsDrawer
-        open={toolsOpen}
-        onClose={() => setToolsOpen(false)}
-        initialCombatantId={toolsTarget}
-      />
+      <GMToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
     </div>
   );
 }

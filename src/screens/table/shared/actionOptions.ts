@@ -134,6 +134,33 @@ export function buildActionOptions(character: Character | null | undefined): Act
         supportive,
       });
     }
+
+    // Change Equipment — swap to another owned weapon not currently wielded.
+    // Candidates: the equipped slot (which the UI may have already overridden to
+    // the swapped weapon) plus any weapons stowed in the backpack.
+    const currentWeaponId = character.inventory?.weapon ?? null;
+    const weaponCandidates = new Set<string>();
+    if (currentWeaponId) weaponCandidates.add(currentWeaponId);
+    for (const itemId of character.inventory?.backpack ?? []) {
+      const item = findItem(itemId);
+      if (item?.itemType === 'Weapon') weaponCandidates.add(itemId);
+    }
+    for (const weaponId of weaponCandidates) {
+      if (weaponId === currentWeaponId) continue; // already wielding it
+      const weapon = findItem(weaponId);
+      if (!weapon || weapon.itemType !== 'Weapon') continue;
+      options.push({
+        key: `equip:${weaponId}`,
+        actionType: 'Change Equipment',
+        label: `Equip: ${weapon.name}`,
+        actionId: weaponId,
+        description: weapon.damage
+          ? `${weapon.damage} ${weapon.damageType ?? ''}`.trim()
+          : weapon.description,
+        needsTarget: false,
+        needsLine: false,
+      });
+    }
   }
 
   // Pass / Flee at the end — quiet fallbacks.

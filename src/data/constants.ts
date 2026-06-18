@@ -47,14 +47,31 @@ export const CONDITIONS: ConditionDef[] = [
 ];
 
 /** Range bands, near→far. */
-export const RANGE_ORDER = ['Self', 'Melee', 'Near', 'Far'] as const;
+export const RANGE_ORDER = ['Self', 'Melee', 'Near', 'Far', 'Distant'] as const;
 
-/** Abstract battle lines. Players occupy the low end, enemies the high end. */
-export const BATTLE_LINES = {
-  count: 10,
-  playerStart: 4,
-  enemyStart: 6,
+/**
+ * Range band → maximum hex distance. One combatant per hex, so "Melee" means
+ * adjacent (distance 1) rather than the old same-line distance 0. `Self` is
+ * handled by team check, not distance; `Battlefield` is unbounded. Tunable.
+ */
+export const RANGE_TO_HEX_DISTANCE: Record<string, number> = {
+  Self: 0,
+  Melee: 1,
+  Near: 2,
+  Far: 4,
+  Distant: 6,
+  Battlefield: Infinity,
+};
+
+/** The hex battlefield: pointy-top, offset-rectangular. Players deploy on the
+ * bottom rows, enemies on the top rows. */
+export const BATTLE_GRID = {
+  cols: 9,
+  rows: 7,
 } as const;
+
+/** Hexes a single Move action may cover. Tunable. */
+export const MOVE_RANGE = 4;
 
 /** Rest restoration rules (ported from the original ruleset). */
 export const REST_RULES = {
