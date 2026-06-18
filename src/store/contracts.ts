@@ -12,6 +12,8 @@ import type {
   CombatState,
   Combatant,
   DeclaredAction,
+  HexCoord,
+  Team,
   PartyMember,
   Role,
   ConnectionStatus,
@@ -80,6 +82,12 @@ export interface SessionStore {
 export interface CombatStore {
   combat: CombatState;
   startCombat: (combatants: Combatant[]) => void;
+  /** Leave the GM setup/placement phase and begin round 1's declarations. */
+  beginRound: () => void;
+  /** GM places a combatant on a hex (setup placement + free repositioning). */
+  placeCombatant: (combatantId: string, hex: HexCoord) => void;
+  /** GM reassigns a combatant's team (e.g. recruit a beast as a party ally). */
+  setCombatantTeam: (combatantId: string, team: Team) => void;
   endCombat: () => void;
   declareAction: (combatantId: string, action: DeclaredAction) => void;
   clearAction: (combatantId: string, actionIndex: number) => void;

@@ -197,11 +197,15 @@ describe('deployHexes', () => {
     for (const h of hexes) expect(inBounds(h, GRID)).toBe(true);
   });
 
-  it('places players on the bottom rows and enemies on the top rows', () => {
+  it('places players below the midline and enemies above, with a gap between', () => {
+    const mid = Math.floor(GRID.rows / 2);
     const players = deployHexes('player', 3, GRID);
     const enemies = deployHexes('npc', 3, GRID);
-    expect(players.every((h) => h.r === GRID.rows - 1)).toBe(true);
-    expect(enemies.every((h) => h.r === 0)).toBe(true);
+    expect(players.every((h) => h.r > mid)).toBe(true);
+    expect(enemies.every((h) => h.r < mid)).toBe(true);
+    const nearestPlayer = Math.min(...players.map((h) => h.r));
+    const nearestEnemy = Math.max(...enemies.map((h) => h.r));
+    expect(nearestPlayer - nearestEnemy).toBeGreaterThan(1); // open lane between the lines
   });
 
   it('overflows onto the next row when a row fills, staying in the zone', () => {

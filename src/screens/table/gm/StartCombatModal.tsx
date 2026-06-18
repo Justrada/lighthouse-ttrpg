@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Swords, Check, Plus, UserPlus, Skull, Users, BookOpen, Heart, Shield } from 'lucide-react';
-import type { Character, Combatant, PartyMember } from '@/types';
-import { Modal, Button, Avatar, Badge, EmptyState, Divider, NumberStepper, Tabs } from '@/components/ui';
+import type { Character, Combatant, PartyMember, Team } from '@/types';
+import { Modal, Button, Avatar, Badge, EmptyState, Divider, NumberStepper, Tabs, SegmentedControl } from '@/components/ui';
 import { useRosterStore, useCombatStore, useUIStore } from '@/store';
 import { createCombatant, calculateDerivedStats } from '@/engine';
 import { NPC_TEMPLATES, type NpcTemplate } from '@/data/npcTemplates';
@@ -37,36 +37,62 @@ function instanceOf(template: Character, index: number, count: number): Characte
   };
 }
 
+/** Enemy/Ally allegiance options for the per-row team toggle. */
+const TEAM_OPTIONS: { value: Team; label: string }[] = [
+  { value: 'npc', label: 'Enemy' },
+  { value: 'player', label: 'Ally' },
+];
+
 /**
  * GM combat setup: pick which connected players join the fray (team 'player')
- * and stage enemies/NPCs — either from the saved roster or the drop-in bestiary
- * (team 'npc', optionally several copies of the same template). Builds
- * `Combatant[]` via the engine and starts combat.
+ * and stage other units — either from the saved roster or the drop-in bestiary,
+ * optionally several copies of the same template. Each staged unit can enter as
+ * an **Enemy** (team 'npc', default) or an **Ally** (team 'player'), so a beast
+ * can start on the party's side. Builds `Combatant[]` via the engine and starts
+ * combat. (Allegiance can still be flipped later from the GM's order roster.)
  */
 export function StartCombatModal({ open, onClose, party }: StartCombatModalProps) {
   const roster = useRosterStore((s) => s.characters);
   const startCombat = useCombatStore((s) => s.startCombat);
   const pushToast = useUIStore((s) => s.pushToast);
 
-  // Selected players (default: all connected) and enemy counts keyed by source id.
+  // Selected players (default: all connected) and staged-unit counts keyed by
+  // source id, plus a per-source team override (default 'npc' = Enemy).
   const [players, setPlayers] = useState<Record<string, boolean>>({});
   const [enemyCounts, setEnemyCounts] = useState<Record<string, number>>({});
   const [bestiaryCounts, setBestiaryCounts] = useState<Record<string, number>>({});
+  const [rosterTeams, setRosterTeams] = useState<Record<string, Team>>({});
+  const [bestiaryTeams, setBestiaryTeams] = useState<Record<string, Team>>({});
   const [foeTab, setFoeTab] = useState<FoeTab>('roster');
 
   const selectedPlayers = useMemo(
     () => party.filter((m) => players[m.peerId] ?? true),
     [party, players],
   );
-  const rosterEnemies = useMemo(
+  const rosterStaged = useMemo(
     () => Object.values(enemyCounts).reduce((a, b) => a + b, 0),
     [enemyCounts],
   );
-  const bestiaryEnemies = useMemo(
+  const bestiaryStaged = useMemo(
     () => Object.values(bestiaryCounts).reduce((a, b) => a + b, 0),
     [bestiaryCounts],
   );
-  const totalEnemies = rosterEnemies + bestiaryEnemies;
+  const totalStaged = rosterStaged + bestiaryStaged;
+
+  // Split staged units into foes vs allied beasts so the summary/toast read right.
+  const { stagedEnemies, stagedAllies } = useMemo(() => {
+    let enemies = 0;
+    let allies = 0;
+    for (const [id, n] of Object.entries(enemyCounts)) {
+      if ((rosterTeams[id] ?? 'npc') === 'player') allies += n;
+      else enemies += n;
+    }
+    for (const [id, n] of Object.entries(bestiaryCounts)) {
+      if ((bestiaryTeams[id] ?? 'npc') === 'player') allies += n;
+      else enemies += n;
+    }
+    return { stagedEnemies: enemies, stagedAllies: allies };
+  }, [enemyCounts, bestiaryCounts, rosterTeams, bestiaryTeams]);
 
   // Bestiary grouped by tier, in display order.
   const bestiaryByTier = useMemo(
@@ -87,7 +113,13 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
   const setBestiaryCount = (id: string, n: number) =>
     setBestiaryCounts((c) => ({ ...c, [id]: Math.max(0, n) }));
 
-  const canStart = selectedPlayers.length + totalEnemies > 0;
+  const setRosterTeam = (id: string, team: Team) =>
+    setRosterTeams((t) => ({ ...t, [id]: team }));
+
+  const setBestiaryTeam = (id: string, team: Team) =>
+    setBestiaryTeams((t) => ({ ...t, [id]: team }));
+
+  const canStart = selectedPlayers.length + totalStaged > 0;
 
   const begin = () => {
     const list: Combatant[] = [];
@@ -99,28 +131,35 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
     for (const [rosterId, count] of Object.entries(enemyCounts)) {
       const template = roster.find((c) => c.id === rosterId);
       if (!template || count <= 0) continue;
+      const team = rosterTeams[rosterId] ?? 'npc';
       for (let i = 0; i < count; i++) {
-        list.push(createCombatant(instanceOf(template, i, count), { team: 'npc' }));
+        list.push(createCombatant(instanceOf(template, i, count), { team }));
       }
     }
 
     for (const [npcId, count] of Object.entries(bestiaryCounts)) {
       const template = NPC_TEMPLATES.find((t) => t.character.id === npcId)?.character;
       if (!template || count <= 0) continue;
+      const team = bestiaryTeams[npcId] ?? 'npc';
       for (let i = 0; i < count; i++) {
-        list.push(createCombatant(instanceOf(template, i, count), { team: 'npc' }));
+        list.push(createCombatant(instanceOf(template, i, count), { team }));
       }
     }
 
     if (list.length === 0) return;
     startCombat(list);
+    const heroes = selectedPlayers.length + stagedAllies;
     pushToast({
       title: 'Combat begins',
-      body: `${selectedPlayers.length} heroes vs ${totalEnemies} foes.`,
+      body: `${heroes} ${heroes === 1 ? 'ally' : 'allies'} vs ${stagedEnemies} ${
+        stagedEnemies === 1 ? 'foe' : 'foes'
+      }.`,
       tone: 'arcane',
     });
     setEnemyCounts({});
     setBestiaryCounts({});
+    setRosterTeams({});
+    setBestiaryTeams({});
     onClose();
   };
 
@@ -134,8 +173,9 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
       footer={
         <>
           <span className="mr-auto text-xs text-ink-muted">
-            {selectedPlayers.length} {selectedPlayers.length === 1 ? 'hero' : 'heroes'} ·{' '}
-            {totalEnemies} {totalEnemies === 1 ? 'foe' : 'foes'}
+            {selectedPlayers.length + stagedAllies}{' '}
+            {selectedPlayers.length + stagedAllies === 1 ? 'ally' : 'allies'} ·{' '}
+            {stagedEnemies} {stagedEnemies === 1 ? 'foe' : 'foes'}
           </span>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
@@ -205,14 +245,15 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
 
         <Divider label="Versus" />
 
-        {/* Foes — from the saved roster or the drop-in bestiary. */}
+        {/* Other units — staged from the saved roster or the drop-in bestiary.
+            Each can enter as an Enemy (default) or an allied beast. */}
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-ink-faint">
               Foes & NPCs
             </h4>
             <Badge tone="danger" size="sm" variant="soft" icon={<Skull />}>
-              {totalEnemies} staged
+              {totalStaged} staged
             </Badge>
           </div>
 
@@ -227,9 +268,9 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
                 label: 'Your Roster',
                 icon: <Users />,
                 badge:
-                  rosterEnemies > 0 ? (
-                    <Badge tone="danger" size="sm" variant="solid">
-                      {rosterEnemies}
+                  rosterStaged > 0 ? (
+                    <Badge tone="beam" size="sm" variant="solid">
+                      {rosterStaged}
                     </Badge>
                   ) : undefined,
               },
@@ -238,9 +279,9 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
                 label: 'Bestiary',
                 icon: <BookOpen />,
                 badge:
-                  bestiaryEnemies > 0 ? (
-                    <Badge tone="danger" size="sm" variant="solid">
-                      {bestiaryEnemies}
+                  bestiaryStaged > 0 ? (
+                    <Badge tone="beam" size="sm" variant="solid">
+                      {bestiaryStaged}
                     </Badge>
                   ) : undefined,
               },
@@ -259,41 +300,60 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
               <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                 {roster.map((c) => {
                   const count = enemyCounts[c.id] ?? 0;
+                  const team = rosterTeams[c.id] ?? 'npc';
+                  const ally = team === 'player';
                   return (
                     <div
                       key={c.id}
                       className={cn(
-                        'flex items-center gap-3 rounded-xl border p-2.5',
-                        count > 0 ? 'border-danger/40 bg-danger/[0.06]' : 'border-line bg-void/40',
+                        'flex flex-col gap-2 rounded-xl border p-2.5',
+                        count === 0
+                          ? 'border-line bg-void/40'
+                          : ally
+                            ? 'border-arcane/40 bg-arcane/[0.06]'
+                            : 'border-danger/40 bg-danger/[0.06]',
                       )}
                     >
-                      <Avatar
-                        seed={c.portraitSeed ?? c.id}
-                        name={c.name}
-                        size={36}
-                        ring={count > 0 ? 'beam' : 'none'}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
-                        <p className="text-xs text-ink-faint">Lv {c.level}</p>
+                      <div className="flex items-center gap-3">
+                        <Avatar
+                          seed={c.portraitSeed ?? c.id}
+                          name={c.name}
+                          size={36}
+                          ring={count > 0 ? (ally ? 'arcane' : 'beam') : 'none'}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
+                          <p className="text-xs text-ink-faint">Lv {c.level}</p>
+                        </div>
+                        {count === 0 ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            leftIcon={<Plus className="h-3.5 w-3.5" />}
+                            onClick={() => setEnemyCount(c.id, 1)}
+                          >
+                            Add
+                          </Button>
+                        ) : (
+                          <NumberStepper
+                            size="sm"
+                            value={count}
+                            min={0}
+                            max={12}
+                            onChange={(n) => setEnemyCount(c.id, n)}
+                            aria-label={`${c.name} count`}
+                          />
+                        )}
                       </div>
-                      {count === 0 ? (
-                        <Button
+                      {count > 0 && (
+                        <SegmentedControl<Team>
+                          value={team}
+                          onChange={(v) => setRosterTeam(c.id, v)}
+                          options={TEAM_OPTIONS}
                           size="sm"
-                          variant="secondary"
-                          leftIcon={<Plus className="h-3.5 w-3.5" />}
-                          onClick={() => setEnemyCount(c.id, 1)}
-                        >
-                          Add
-                        </Button>
-                      ) : (
-                        <NumberStepper
-                          size="sm"
-                          value={count}
-                          min={0}
-                          max={12}
-                          onChange={(n) => setEnemyCount(c.id, n)}
-                          aria-label={`${c.name} count`}
+                          fullWidth
+                          tone={ally ? 'arcane' : 'beam'}
+                          aria-label={`${c.name} allegiance`}
                         />
                       )}
                     </div>
@@ -318,56 +378,75 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
                         const c = t.character;
                         const count = bestiaryCounts[c.id] ?? 0;
                         const derived = calculateDerivedStats(c);
+                        const team = bestiaryTeams[c.id] ?? 'npc';
+                        const ally = team === 'player';
                         return (
                           <div
                             key={c.id}
                             className={cn(
-                              'flex items-center gap-3 rounded-xl border p-2.5',
-                              count > 0 ? 'border-danger/40 bg-danger/[0.06]' : 'border-line bg-void/40',
+                              'flex flex-col gap-2 rounded-xl border p-2.5',
+                              count === 0
+                                ? 'border-line bg-void/40'
+                                : ally
+                                  ? 'border-arcane/40 bg-arcane/[0.06]'
+                                  : 'border-danger/40 bg-danger/[0.06]',
                             )}
                           >
-                            <Avatar
-                              seed={c.portraitSeed ?? c.id}
-                              name={c.name}
-                              size={36}
-                              ring={count > 0 ? 'beam' : 'none'}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
-                                <Badge tone={meta.tone} size="sm" variant="outline">
-                                  {meta.label}
-                                </Badge>
+                            <div className="flex items-center gap-3">
+                              <Avatar
+                                seed={c.portraitSeed ?? c.id}
+                                name={c.name}
+                                size={36}
+                                ring={count > 0 ? (ally ? 'arcane' : 'beam') : 'none'}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="truncate text-sm font-semibold text-ink">{c.name}</p>
+                                  <Badge tone={meta.tone} size="sm" variant="outline">
+                                    {meta.label}
+                                  </Badge>
+                                </div>
+                                <p className="truncate text-xs text-ink-faint">{t.role}</p>
+                                <div className="mt-0.5 flex items-center gap-3 text-[0.65rem] text-ink-muted">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Heart className="h-3 w-3 text-hp" />
+                                    {derived.hp}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <Shield className="h-3 w-3 text-arcane-soft" />
+                                    {derived.ac}
+                                  </span>
+                                </div>
                               </div>
-                              <p className="truncate text-xs text-ink-faint">{t.role}</p>
-                              <div className="mt-0.5 flex items-center gap-3 text-[0.65rem] text-ink-muted">
-                                <span className="inline-flex items-center gap-1">
-                                  <Heart className="h-3 w-3 text-hp" />
-                                  {derived.hp}
-                                </span>
-                                <span className="inline-flex items-center gap-1">
-                                  <Shield className="h-3 w-3 text-arcane-soft" />
-                                  {derived.ac}
-                                </span>
-                              </div>
+                              {count === 0 ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  leftIcon={<Plus className="h-3.5 w-3.5" />}
+                                  onClick={() => setBestiaryCount(c.id, 1)}
+                                >
+                                  Add
+                                </Button>
+                              ) : (
+                                <NumberStepper
+                                  size="sm"
+                                  value={count}
+                                  min={0}
+                                  max={12}
+                                  onChange={(n) => setBestiaryCount(c.id, n)}
+                                  aria-label={`${c.name} count`}
+                                />
+                              )}
                             </div>
-                            {count === 0 ? (
-                              <Button
+                            {count > 0 && (
+                              <SegmentedControl<Team>
+                                value={team}
+                                onChange={(v) => setBestiaryTeam(c.id, v)}
+                                options={TEAM_OPTIONS}
                                 size="sm"
-                                variant="secondary"
-                                leftIcon={<Plus className="h-3.5 w-3.5" />}
-                                onClick={() => setBestiaryCount(c.id, 1)}
-                              >
-                                Add
-                              </Button>
-                            ) : (
-                              <NumberStepper
-                                size="sm"
-                                value={count}
-                                min={0}
-                                max={12}
-                                onChange={(n) => setBestiaryCount(c.id, n)}
-                                aria-label={`${c.name} count`}
+                                fullWidth
+                                tone={ally ? 'arcane' : 'beam'}
+                                aria-label={`${c.name} allegiance`}
                               />
                             )}
                           </div>

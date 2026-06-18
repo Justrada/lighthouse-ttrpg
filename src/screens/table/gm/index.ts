@@ -7,5 +7,5 @@ export { RequestCheckModal } from './RequestCheckModal';
 export type { RequestCheckModalProps } from './RequestCheckModal';
 export { GMToolsDrawer } from './GMToolsDrawer';
 export type { GMToolsDrawerProps } from './GMToolsDrawer';
-export { NpcActionPanel } from './NpcActionPanel';
-export type { NpcActionPanelProps } from './NpcActionPanel';
+export { OrderRosterRow } from './OrderRosterRow';
+export type { OrderRosterRowProps } from './OrderRosterRow';

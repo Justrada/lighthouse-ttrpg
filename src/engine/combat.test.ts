@@ -329,12 +329,12 @@ describe('movement', () => {
 
     const { state: after } = resolveAction(
       state,
-      action({ actionType: 'Move', sourceId: 'hero', targetHex: hex(8, 3) }), // distance 8, budget 4
+      action({ actionType: 'Move', sourceId: 'hero', targetHex: hex(8, 3) }), // distance 8, budget MOVE_RANGE(6)
       maxRng,
     );
     const heroAfter = after.combatants.find((c) => c.id === 'hero')!;
-    expect(hexDistance(hex(0, 3), heroAfter.position)).toBeLessThanOrEqual(4);
-    expect(hexDistance(heroAfter.position, hex(8, 3))).toBe(4); // got as close as the budget allows
+    expect(hexDistance(hex(0, 3), heroAfter.position)).toBeLessThanOrEqual(6);
+    expect(hexDistance(heroAfter.position, hex(8, 3))).toBe(2); // got as close as the budget allows
   });
 
   it('does not land on a hex occupied by another combatant', () => {
@@ -424,8 +424,8 @@ describe('push / pull (Move Target effect)', () => {
   });
 
   it('a push stops at the grid edge', () => {
-    const src = createCombatant(strong('src'), { team: 'npc', position: hex(5, 3) });
-    const tgt = createCombatant(feeble('tgt'), { team: 'player', position: hex(6, 3) }); // adjacent, near the edge
+    const src = createCombatant(strong('src'), { team: 'npc', position: hex(14, 3) });
+    const tgt = createCombatant(feeble('tgt'), { team: 'player', position: hex(15, 3) }); // adjacent, against the right edge
     const { state: after } = resolveAction(
       makeState(src, tgt),
       action({ actionType: 'Use Ability', sourceId: 'src', sourceTeam: 'npc', targetId: 'tgt', actionId: KNOCK_KNOCK }),
@@ -434,8 +434,8 @@ describe('push / pull (Move Target effect)', () => {
     );
     const t = after.combatants.find((c) => c.id === 'tgt')!;
     // Only one of the two push steps fits before the rightmost column; it halts there.
-    expect(t.position).toEqual({ q: 7, r: 3 });
-    expect(hexDistance(hex(6, 3), t.position)).toBe(1);
+    expect(t.position).toEqual({ q: 16, r: 3 });
+    expect(hexDistance(hex(15, 3), t.position)).toBe(1);
   });
 
   it('pulls the target one hex toward the source', () => {

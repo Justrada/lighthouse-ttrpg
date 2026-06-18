@@ -135,15 +135,21 @@ export function gridHexes(dims: GridDims): HexCoord[] {
 }
 
 /**
- * Distinct starting hexes for a team: players fill the bottom rows, enemies the
- * top rows, centered across the columns. Returns exactly `count` hexes (capped
- * to the team's deployment zone).
+ * Distinct starting hexes for a team, centered horizontally and placed a few rows
+ * to either side of the midline (players below, enemies above) — leaving an open
+ * gap between the lines instead of pinning them to the back rows. The GM can drag
+ * everyone elsewhere during the setup phase. Returns exactly `count` hexes.
  */
 export function deployHexes(team: 'player' | 'npc', count: number, dims: GridDims): HexCoord[] {
-  const rows = team === 'player' ? [dims.rows - 1, dims.rows - 2, dims.rows - 3] : [0, 1, 2];
+  const mid = Math.floor(dims.rows / 2);
+  // Two-row gap around the midline; rows fan outward from there if more are needed.
+  const rows =
+    team === 'player'
+      ? [mid + 2, mid + 3, mid + 4, mid + 1].filter((r) => r < dims.rows)
+      : [mid - 2, mid - 3, mid - 4, mid - 1].filter((r) => r >= 0);
   const out: HexCoord[] = [];
   for (const row of rows) {
-    if (out.length >= count || row < 0 || row >= dims.rows) break;
+    if (out.length >= count) break;
     const need = Math.min(count - out.length, dims.cols);
     const start = Math.max(0, Math.floor((dims.cols - need) / 2));
     for (let i = 0; i < need; i += 1) out.push(offsetToAxial(start + i, row));

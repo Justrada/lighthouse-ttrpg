@@ -107,13 +107,59 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     const combat: CombatState = {
       ...emptyCombat(),
       isActive: true,
-      phase: 'declare',
+      phase: 'setup',
       round: 1,
       combatants: placed,
-      log: [logEntry(1, '⚔️ Combat begins. Declare your actions.', 'beam')],
+      log: [logEntry(1, '⚔️ Combat staged. Position your combatants, then begin the round.', 'beam')],
     };
     set({ combat });
     if (isGM()) useSessionStore.getState().send({ type: 'combat_start', payload: { combat } });
+  },
+
+  /** Leave the setup/placement phase and start round 1's declarations. GM only. */
+  beginRound: () => {
+    if (!isGM() || get().combat.phase !== 'setup') return;
+    set((s) => ({ combat: { ...s.combat, phase: 'declare' } }));
+    get().appendLog(logEntry(get().combat.round, '— The round begins. Declare your actions. —', 'beam'));
+    broadcast(get().combat);
+  },
+
+  /** GM directly places a combatant on a hex (setup placement + free repositioning). */
+  placeCombatant: (combatantId, hex) => {
+    if (!isGM()) return;
+    const cur = get().combat;
+    if (cur.phase === 'resolving') return;
+    const occupied = cur.combatants.some(
+      (c) => c.id !== combatantId && !c.isDead && c.position.q === hex.q && c.position.r === hex.r,
+    );
+    if (occupied) return;
+    set({
+      combat: {
+        ...cur,
+        combatants: cur.combatants.map((c) => (c.id === combatantId ? { ...c, position: hex } : c)),
+      },
+    });
+    broadcast(get().combat);
+  },
+
+  /** GM reassigns a combatant's team (e.g. recruit a beast as a party ally). */
+  setCombatantTeam: (combatantId, team) => {
+    if (!isGM()) return;
+    set((s) => ({
+      combat: {
+        ...s.combat,
+        combatants: s.combat.combatants.map((c) => (c.id === combatantId ? { ...c, team } : c)),
+      },
+    }));
+    const c = get().combat.combatants.find((x) => x.id === combatantId);
+    get().appendLog(
+      logEntry(
+        get().combat.round,
+        `${c?.name ?? 'A combatant'} now fights for the ${team === 'player' ? 'party' : 'enemy'}.`,
+        'arcane',
+      ),
+    );
+    broadcast(get().combat);
   },
 
   endCombat: () => {
@@ -124,6 +170,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   },
 
   declareAction: (combatantId, action) => {
+    if (get().combat.phase !== 'declare') return;
     set((s) => {
       const existing = s.combat.declaredActions[combatantId] ?? [];
       const next = existing.filter((a) => a.actionIndex !== action.actionIndex);
@@ -139,6 +186,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   },
 
   clearAction: (combatantId, actionIndex) => {
+    if (get().combat.phase !== 'declare') return;
     set((s) => {
       const existing = s.combat.declaredActions[combatantId] ?? [];
       return {
@@ -157,6 +205,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   },
 
   lockActions: (combatantId, locked) => {
+    if (get().combat.phase !== 'declare') return;
     set((s) => ({
       combat: { ...s.combat, lockedActions: { ...s.combat.lockedActions, [combatantId]: locked } },
     }));
@@ -184,7 +233,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   resolveRound: async () => {
     if (!isGM()) return;
     const state = get().combat;
-    if (!state.isActive || state.phase === 'resolving') return;
+    if (!state.isActive || state.phase !== 'declare') return;
 
     set((s) => ({ combat: { ...s.combat, phase: 'resolving' } }));
     const reduceMotion = useUIStore.getState().reduceMotion;
@@ -318,7 +367,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
 
   // --- network-router entry points (GM side) ---
   applyRemoteDeclare: (combatantId, actions) => {
-    if (get().combat.phase === 'resolving') return;
+    if (get().combat.phase !== 'declare') return;
     set((s) => ({
       combat: { ...s.combat, declaredActions: { ...s.combat.declaredActions, [combatantId]: actions } },
     }));
@@ -326,7 +375,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   },
 
   applyRemoteLock: (combatantId, locked) => {
-    if (get().combat.phase === 'resolving') return;
+    if (get().combat.phase !== 'declare') return;
     set((s) => ({
       combat: { ...s.combat, lockedActions: { ...s.combat.lockedActions, [combatantId]: locked } },
     }));

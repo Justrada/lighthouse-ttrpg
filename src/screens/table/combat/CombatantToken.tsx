@@ -5,6 +5,7 @@ import type { Combatant } from '@/types';
 import { Avatar, ResourceBar, ConditionBadge } from '@/components/ui';
 import { CONDITIONS } from '@/data/constants';
 import { cn } from '@/lib/cn';
+import { ChessPiece } from './ChessPiece';
 
 export interface CombatantTokenProps {
   combatant: Combatant;
@@ -258,6 +259,142 @@ function HexToken({
   }
 
   return <div className={frameClass}>{inner}</div>;
+}
+
+export interface BoardTokenProps {
+  combatant: Combatant;
+  /** Glow as the actor currently resolving. */
+  active?: boolean;
+  /** Ring as the actor currently being ordered. */
+  isActor?: boolean;
+  /** Piece art height in px (scales the whole token). */
+  pieceHeight?: number;
+  /** Suppress damage/heal floaters (e.g. setup previews). */
+  noFloaters?: boolean;
+  className?: string;
+}
+
+/**
+ * The board-ready combatant: an upright {@link ChessPiece} (team-coloured, no
+ * profile picture) standing on its hex, with the readable name above it and the
+ * slim HP bar + condition icons below. Keeps the KO / dead overlays, the
+ * guarding pip, the active-actor glow, and the floating damage/heal numbers.
+ *
+ * Deliberately presentational — no pointer handlers — so the board can wrap it
+ * in a single click/drag surface whose hit area matches exactly what's drawn
+ * (no 3D transform anywhere on the path).
+ */
+export function BoardToken({
+  combatant,
+  active = false,
+  isActor = false,
+  pieceHeight = 64,
+  noFloaters = false,
+  className,
+}: BoardTokenProps) {
+  const floaters = useFloaters(combatant.currentHP, noFloaters);
+  const down = combatant.isUnconscious || combatant.isDead;
+  const isEnemy = combatant.team === 'npc';
+  const nameW = Math.max(72, Math.round(pieceHeight * 1.5));
+
+  return (
+    <div
+      className={cn('relative flex flex-col items-center', className)}
+      style={{ width: nameW }}
+    >
+      {/* Name chip — always readable, sits above the piece. */}
+      <span
+        className={cn(
+          'pointer-events-none relative z-10 max-w-full truncate rounded-md border px-1.5 py-0.5 font-display text-[0.625rem] font-semibold leading-tight tracking-wide shadow-sm backdrop-blur-sm',
+          down
+            ? 'border-line/60 bg-void/85 text-ink-muted'
+            : isEnemy
+              ? 'border-danger/40 bg-void/85 text-ink'
+              : 'border-arcane/40 bg-void/85 text-ink',
+        )}
+      >
+        {combatant.name}
+      </span>
+
+      {/* The standing piece (with overlays + floaters). */}
+      <div className="relative -mt-0.5" style={{ width: pieceHeight, height: pieceHeight }}>
+        {/* Active-actor floor glow behind the piece. */}
+        <AnimatePresence>
+          {active && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.6 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.6 }}
+              className="pointer-events-none absolute bottom-1 left-1/2 -z-10 -translate-x-1/2 rounded-full bg-beam/30 blur-md"
+              style={{ width: pieceHeight * 1.1, height: pieceHeight * 0.5 }}
+              aria-hidden
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Selection ring (being ordered): a soft ground halo. */}
+        {isActor && !active && (
+          <span
+            className="pointer-events-none absolute bottom-1.5 left-1/2 -z-10 -translate-x-1/2 rounded-full bg-beam/20 blur-sm"
+            style={{ width: pieceHeight * 0.95, height: pieceHeight * 0.4 }}
+            aria-hidden
+          />
+        )}
+
+        <Floaters floaters={floaters} />
+
+        <ChessPiece
+          combatant={combatant}
+          height={pieceHeight}
+          muted={down}
+          className={cn(
+            'absolute bottom-0 left-1/2 -translate-x-1/2',
+            isActor && 'drop-shadow-[0_0_10px_rgba(245,185,66,0.65)]',
+            active && 'drop-shadow-[0_0_14px_rgba(245,185,66,0.85)]',
+          )}
+        />
+
+        {/* Guarding pip. */}
+        {combatant.isGuarding && !down && (
+          <span
+            className="absolute right-0 top-1 grid h-4 w-4 place-items-center rounded-full border border-beam/50 bg-surface text-beam shadow"
+            title="Guarding"
+          >
+            <Shield className="h-2.5 w-2.5" />
+          </span>
+        )}
+
+        {/* Defeated overlays, centred on the piece body. */}
+        {combatant.isDead && (
+          <span className="absolute inset-x-0 top-1/3 grid place-items-center">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-abyss/80">
+              <Skull className="h-4 w-4 text-hp" />
+            </span>
+          </span>
+        )}
+        {combatant.isUnconscious && !combatant.isDead && (
+          <span className="absolute inset-x-0 top-1/3 grid place-items-center">
+            <span className="rounded-full bg-abyss/75 px-1.5 py-0.5 font-display text-[0.5rem] font-bold uppercase tracking-widest text-warn">
+              Down
+            </span>
+          </span>
+        )}
+      </div>
+
+      {/* Slim HP bar + conditions below the base. */}
+      <div className="mt-0.5 flex flex-col items-center gap-0.5">
+        <ResourceBar
+          kind="hp"
+          size="sm"
+          current={combatant.currentHP}
+          max={combatant.maxHP}
+          hideValue
+          className="w-[4rem]"
+        />
+        <ConditionRow combatant={combatant} max={3} />
+      </div>
+    </div>
+  );
 }
 
 /** The full roster card (used outside the board). */

@@ -53,6 +53,7 @@ describe('combatStore — deadlock guard (allLocked)', () => {
     // Only peerA and peerC remain in the party (peerB downed, peerGONE disconnected).
     useSessionStore.setState({ role: 'gm', party: [member('peerA'), member('peerC')] });
     useCombatStore.getState().startCombat([connected, downed, gone, dead, npc]);
+    useCombatStore.getState().beginRound(); // leave setup → declare so locks apply
 
     // Must-lock set should be just p1 (connected player) and n1 (NPC).
     expect(useCombatStore.getState().allLocked()).toBe(false);

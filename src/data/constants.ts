@@ -63,15 +63,17 @@ export const RANGE_TO_HEX_DISTANCE: Record<string, number> = {
   Battlefield: Infinity,
 };
 
-/** The hex battlefield: pointy-top, offset-rectangular. Players deploy on the
- * bottom rows, enemies on the top rows. */
+/** The hex battlefield: pointy-top, offset-rectangular. Roomy (~4× the original)
+ * so combatants deploy near the middle with space to maneuver rather than jammed
+ * against opposite back rows. The GM can reposition everyone during the setup
+ * phase. Tunable. */
 export const BATTLE_GRID = {
-  cols: 9,
-  rows: 7,
+  cols: 18,
+  rows: 14,
 } as const;
 
 /** Hexes a single Move action may cover. Tunable. */
-export const MOVE_RANGE = 4;
+export const MOVE_RANGE = 6;
 
 /** Rest restoration rules (ported from the original ruleset). */
 export const REST_RULES = {

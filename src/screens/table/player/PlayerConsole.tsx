@@ -32,6 +32,7 @@ export function PlayerConsole() {
   const npcs = useNpcCombatants();
 
   const inCombat = combat.isActive;
+  const isSetup = combat.phase === 'setup';
   const combatants = [...players, ...npcs];
 
   return (
@@ -88,8 +89,22 @@ export function PlayerConsole() {
               />
             </Panel>
 
-            {/* Declaration (declare phase) or resolution view */}
-            {combat.phase === 'declare' && myCombatant && !myCombatant.isDead && !myCombatant.isUnconscious ? (
+            {/* Setup: the GM is positioning combatants; the board above is
+                read-only until the round begins. */}
+            {isSetup ? (
+              <Panel padded className="flex flex-col items-center gap-3 py-8 text-center">
+                <Spinner size="lg" tone="arcane" />
+                <div>
+                  <p className="font-display text-sm tracking-wide text-arcane-soft">
+                    The GM is preparing the battlefield…
+                  </p>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Take your place. Your orders open once the round begins.
+                  </p>
+                </div>
+              </Panel>
+            ) : /* Declaration (declare phase) or resolution view */
+            combat.phase === 'declare' && myCombatant && !myCombatant.isDead && !myCombatant.isUnconscious ? (
               <Panel padded>
                 <div className="mb-1 flex items-center gap-2">
                   <span className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-beam-soft">

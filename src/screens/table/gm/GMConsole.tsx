@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Swords, Wand2, Dices, Play, Flag, ScrollText, ShieldQuestion } from 'lucide-react';
+import {
+  Swords,
+  Wand2,
+  Dices,
+  Play,
+  Flag,
+  ScrollText,
+  ShieldQuestion,
+  Hand,
+  MapPin,
+} from 'lucide-react';
 import {
   Panel,
   PanelHeader,
@@ -10,13 +20,13 @@ import {
   Spinner,
 } from '@/components/ui';
 import { GlowOrb } from '@/components/atmosphere';
-import { useSessionStore, useCombatStore, useNpcCombatants } from '@/store';
+import { useSessionStore, useCombatStore, useGMControlledCombatants } from '@/store';
 import { HexBoard, StagedActions, CombatLog, PhaseBanner } from '../combat';
 import { PartyPanel } from './PartyPanel';
 import { StartCombatModal } from './StartCombatModal';
 import { RequestCheckModal } from './RequestCheckModal';
 import { GMToolsDrawer } from './GMToolsDrawer';
-import { NpcActionPanel } from './NpcActionPanel';
+import { OrderRosterRow } from './OrderRosterRow';
 
 /** The Game Master's command center — party oversight + combat direction. */
 export function GMConsole() {
@@ -26,30 +36,35 @@ export function GMConsole() {
   const allLocked = useCombatStore((s) => s.allLocked);
   const resolveRound = useCombatStore((s) => s.resolveRound);
   const endCombat = useCombatStore((s) => s.endCombat);
-  const npcsAll = useNpcCombatants();
+  const beginRound = useCombatStore((s) => s.beginRound);
+  // Every unit the GM may order: enemies, GM-controlled allies, and any player
+  // slot with nobody connected to drive it.
+  const controlledAll = useGMControlledCombatants();
 
   const [startOpen, setStartOpen] = useState(false);
   const [checkOpen, setCheckOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
-  // Which NPC the GM is currently ordering on the board.
+  // Which unit the GM is currently ordering on the board.
   const [orderingId, setOrderingId] = useState<string | null>(null);
 
   const inCombat = combat.isActive;
-  // Living NPCs the GM can order (the dead drop off the roster).
-  const npcs = useMemo(() => npcsAll.filter((c) => !c.isDead), [npcsAll]);
+  const isSetup = combat.phase === 'setup';
+  // Living units the GM can order (the dead drop off the roster).
+  const controlled = useMemo(() => controlledAll.filter((c) => !c.isDead), [controlledAll]);
   const ready = allLocked();
 
-  // Keep the active actor valid: default to the first foe that still needs to
-  // act (alive, conscious, unlocked), and never leave it pointing at a foe that
-  // has left the fight.
+  // Keep the active actor valid: default to the first unit that still needs to
+  // act (alive, conscious, unlocked), and never leave it pointing at a unit that
+  // has left the fight or is no longer GM-controlled.
   useEffect(() => {
-    const orderable = npcs.filter((c) => !c.isUnconscious);
+    if (isSetup) return; // No ordering during placement.
+    const orderable = controlled.filter((c) => !c.isUnconscious);
     const stillValid = orderingId != null && orderable.some((c) => c.id === orderingId);
     if (stillValid) return;
     const firstUnlocked = orderable.find((c) => !lockedActions[c.id]);
     setOrderingId((firstUnlocked ?? orderable[0])?.id ?? null);
-  }, [npcs, lockedActions, orderingId]);
+  }, [controlled, lockedActions, orderingId, isSetup]);
 
   // Reset the active actor when combat ends so the next fight starts clean.
   useEffect(() => {
@@ -68,7 +83,7 @@ export function GMConsole() {
     setResolving(false);
   };
 
-  const orderingNpc = orderingId ? npcs.find((c) => c.id === orderingId) : undefined;
+  const orderingUnit = orderingId ? controlled.find((c) => c.id === orderingId) : undefined;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
@@ -173,24 +188,54 @@ export function GMConsole() {
               }
             />
           </Panel>
+        ) : isSetup ? (
+          /* ----- Setup phase: position everyone, then begin the round. ----- */
+          <Panel padded>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-lg border border-arcane/40 bg-arcane/10 text-arcane-soft">
+                  <MapPin className="h-4 w-4" />
+                </span>
+                <h3 className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-ink-faint">
+                  Position the Field
+                </h3>
+              </div>
+              <Badge tone="arcane" size="sm" variant="soft">
+                Setup
+              </Badge>
+            </div>
+
+            <HexBoard controllable />
+
+            <p className="mt-3 text-center text-xs text-ink-faint">
+              Drag combatants to position them, then begin the round.
+            </p>
+
+            <Button
+              variant="primary"
+              size="lg"
+              fullWidth
+              className="mt-4"
+              leftIcon={<Play className="h-5 w-5" />}
+              onClick={beginRound}
+            >
+              Begin Round
+            </Button>
+          </Panel>
         ) : (
+          /* ----- Declare / resolve: order roster + active-unit orders. ----- */
           <>
             <Panel padded>
-              <HexBoard
-                activeActorId={orderingId}
-                controllable
-                onSelectActor={setOrderingId}
-              />
+              <HexBoard activeActorId={orderingId} controllable />
               <p className="mt-3 text-center text-xs text-ink-faint">
-                Tap a foe to choose who you’re ordering, then stage their actions on the field.
+                Choose a unit from the roster, then stage its actions on the field.
               </p>
             </Panel>
 
-            {/* NPC roster + active-foe orders + resolve */}
             <Panel padded>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-ink-faint">
-                  Foe Orders
+                  Your Units
                 </h3>
                 <Badge tone={ready ? 'success' : 'neutral'} variant="soft">
                   {ready ? 'All locked in' : 'Awaiting locks'}
@@ -204,16 +249,17 @@ export function GMConsole() {
                     The round unfolds…
                   </p>
                 </div>
-              ) : npcs.length === 0 ? (
+              ) : controlled.length === 0 ? (
                 <p className="py-6 text-center text-sm text-ink-muted">
-                  No foes to command. Lock the heroes in and resolve.
+                  No units under your command. Lock the heroes in and resolve.
                 </p>
               ) : (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
-                  {/* Selector: every foe's lock status at a glance */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[17rem_minmax(0,1fr)]">
+                  {/* Roster: every GM-controlled unit, its team + lock status,
+                      with a swap-allegiance control on each row. */}
                   <div className="flex flex-col gap-2">
-                    {npcs.map((c) => (
-                      <NpcActionPanel
+                    {controlled.map((c) => (
+                      <OrderRosterRow
                         key={c.id}
                         combatant={c}
                         active={c.id === orderingId}
@@ -222,14 +268,15 @@ export function GMConsole() {
                     ))}
                   </div>
 
-                  {/* Staged actions for the foe being ordered */}
+                  {/* Staged actions for the unit being ordered. */}
                   <div>
-                    {orderingNpc ? (
-                      <StagedActions actorId={orderingNpc.id} />
+                    {orderingUnit ? (
+                      <StagedActions actorId={orderingUnit.id} />
                     ) : (
-                      <p className="py-6 text-center text-sm text-ink-muted">
-                        Select a foe to give orders.
-                      </p>
+                      <div className="flex flex-col items-center gap-2 py-8 text-center text-ink-muted">
+                        <Hand className="h-5 w-5 text-ink-faint" />
+                        <p className="text-sm">Select a unit to give orders.</p>
+                      </div>
                     )}
                   </div>
                 </div>

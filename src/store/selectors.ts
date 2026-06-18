@@ -36,6 +36,20 @@ export function useNpcCombatants(): Combatant[] {
   return useCombatStore(useShallow((s) => s.combat.combatants.filter((c) => c.team === 'npc')));
 }
 
+/**
+ * Every combatant the GM may order: any unit NOT driven by a *connected* player —
+ * i.e. enemies, GM-controlled allies, and (when no one is connected to that slot)
+ * player tokens too. This is what powers the GM's "order anyone" roster.
+ */
+export function useGMControlledCombatants(): Combatant[] {
+  const party = useSessionStore((s) => s.party);
+  const combatants = useCombatStore((s) => s.combat.combatants);
+  return useMemo(() => {
+    const peers = new Set(party.map((m) => m.peerId));
+    return combatants.filter((c) => c.peerId == null || !peers.has(c.peerId));
+  }, [party, combatants]);
+}
+
 /** True when it's the declare phase and our combatant still needs to lock in. */
 export function useNeedsToDeclare(): boolean {
   const mine = useMyCombatant();
