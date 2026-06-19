@@ -231,7 +231,6 @@ export function HexBoard({
   const itemsFor = (target: Combatant): ActionMenuItem[] => {
     if (!actor) return [];
     const isSelf = target.id === actor.id;
-    const isAlly = !isSelf && target.team === actor.team;
 
     return options
       .filter((opt) => {
@@ -244,9 +243,10 @@ export function HexBoard({
           if (opt.supportive) return true; // a buff/heal the actor can cast on self
           return false;
         }
-        if (isAlly) return Boolean(opt.needsTarget && opt.supportive);
-        // Enemy: offensive, target-seeking options.
-        return Boolean(opt.needsTarget && !opt.supportive);
+        // Any other combatant — ally or enemy — may be targeted by ANY targeted
+        // option: heal a foe, strike an ally, or centre an AOE on anyone. Range
+        // still gates what's actually reachable.
+        return Boolean(opt.needsTarget);
       })
       .map((opt) => {
         // Consumables carry a per-combat charge tally; show the remaining count

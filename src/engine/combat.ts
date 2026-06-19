@@ -401,9 +401,10 @@ function lineHexKeys(source: HexCoord, primary: HexCoord, n: number): Set<string
  * Expand a primary target into the full set affected by an AOE pattern, ported
  * from `getAOETargets`. Supports "Single Target", "AOE N" (a hex blast of radius
  * `floor(N/2)` around the primary), and "Target Line (N Row)"/"Line" (a line/cone
- * of length N from the source through the primary). Supportive skills hit allies;
- * offensive skills hit enemies. Defeated combatants and unconscious enemies are
- * skipped.
+ * of length N from the source through the primary). Area effects are
+ * team-agnostic — a blast catches EVERY combatant in the zone, ally and enemy
+ * alike. Combatants already removed from the fight are skipped, and damaging
+ * effects spare the downed (unconscious).
  */
 export function getAOETargets(
   state: CombatState,
@@ -417,10 +418,11 @@ export function getAOETargets(
   const supportive = isSupportive(data);
   const targets: Combatant[] = [];
 
+  // Area effects are team-agnostic: a blast catches allies and enemies alike.
   const eligible = (c: Combatant): boolean => {
-    if (c.currentHP <= 0 && !c.isUnconscious) return false; // skip truly defeated
-    if (supportive) return source.team === c.team;
-    return source.team !== c.team && !c.isUnconscious; // no offensive vs KO'd
+    if (c.currentHP <= 0 && !c.isUnconscious) return false; // removed from the fight
+    if (!supportive && c.isUnconscious) return false; // damage spares the downed
+    return true;
   };
 
   if (aoe.includes('AOE')) {

@@ -845,27 +845,58 @@ describe('damage-over-time independence (per-effect roll cache)', () => {
   });
 });
 
-describe('AOE classification — damage overrides buff riders', () => {
-  it('treats a damaging AOE that also grants a buff as offensive (hits foes, not allies)', () => {
+describe('area effects are team-agnostic', () => {
+  it('catches every combatant in the zone — allies and enemies alike', () => {
     const caster = createCombatant(makeCharacter({ id: 'caster' }), { team: 'player', position: hex(0, 0) });
     const e1 = createCombatant(makeCharacter({ id: 'e1' }), { team: 'npc', position: hex(4, 0) }); // primary
     const e2 = createCombatant(makeCharacter({ id: 'e2' }), { team: 'npc', position: hex(3, 0) }); // dist 1
     const ally = createCombatant(makeCharacter({ id: 'ally' }), { team: 'player', position: hex(5, 0) }); // dist 1
     const state: CombatState = { ...makeState(caster, e1), combatants: [caster, e1, e2, ally] };
-    // Apply Damage + a "+" Modify Stat rider previously misflagged this as supportive.
     const usable = {
-      name: 'Searing Ward',
+      name: 'Fireburst',
       range: 'Far',
       aoe: 'AOE 3',
       hitType: 'Roll to Hit',
-      effects: [
-        { type: 'Apply Damage', additionalDamage: '2d6' },
-        { type: 'Modify Stat', statToModify: 'AC', modification: '+2' },
-      ],
+      effects: [{ type: 'Apply Damage', additionalDamage: '2d6' }],
     } as never;
     const ids = getAOETargets(state, e1, 'AOE 3', caster, usable).map((t) => t.id).sort();
-    expect(ids).toEqual(['e1', 'e2']);
-    expect(ids).not.toContain('ally');
+    // The friendly 'ally' standing next to the foes is caught in the blast too.
+    expect(ids).toEqual(['ally', 'e1', 'e2']);
+  });
+
+  it('a supportive area effect heals allies and enemies in range', () => {
+    const caster = createCombatant(makeCharacter({ id: 'caster' }), { team: 'player', position: hex(0, 0) });
+    const ally = createCombatant(makeCharacter({ id: 'ally' }), { team: 'player', position: hex(4, 0) }); // primary
+    const foe = createCombatant(makeCharacter({ id: 'foe' }), { team: 'npc', position: hex(5, 0) }); // dist 1
+    const state: CombatState = { ...makeState(caster, ally), combatants: [caster, ally, foe] };
+    const usable = {
+      name: 'Renewing Wave',
+      range: 'Far',
+      aoe: 'AOE 3',
+      hitType: 'Auto Hit',
+      effects: [{ type: 'Modify Stat', statToModify: 'HP', modification: '+2d6' }],
+    } as never;
+    const ids = getAOETargets(state, ally, 'AOE 3', caster, usable).map((t) => t.id).sort();
+    expect(ids).toContain('foe'); // the enemy gets healed by the area too
+    expect(ids).toContain('ally');
+  });
+
+  it('a damaging area effect still spares the already-downed', () => {
+    const caster = createCombatant(makeCharacter({ id: 'caster' }), { team: 'player', position: hex(0, 0) });
+    const foe = createCombatant(makeCharacter({ id: 'foe' }), { team: 'npc', position: hex(4, 0) }); // primary
+    const downed = createCombatant(makeCharacter({ id: 'down' }), { team: 'player', position: hex(3, 0) });
+    downed.isUnconscious = true;
+    downed.currentHP = 0;
+    const state: CombatState = { ...makeState(caster, foe), combatants: [caster, foe, downed] };
+    const usable = {
+      name: 'Blast',
+      range: 'Far',
+      aoe: 'AOE 3',
+      hitType: 'Roll to Hit',
+      effects: [{ type: 'Apply Damage', additionalDamage: '2d6' }],
+    } as never;
+    const ids = getAOETargets(state, foe, 'AOE 3', caster, usable).map((t) => t.id).sort();
+    expect(ids).toEqual(['foe']);
   });
 });
 
