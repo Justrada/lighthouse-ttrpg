@@ -192,3 +192,18 @@ describe('combatStore — deploy overflow', () => {
     expect(new Set(keys).size).toBe(80); // no stacking at {0,0}
   });
 });
+
+describe('combatStore — double-resolve guard (empty queue)', () => {
+  it('two resolveRound calls on an empty queue advance the round only once', async () => {
+    const a = mkCombatant({ id: 'a', team: 'player', peerId: null });
+    const b = mkCombatant({ id: 'b', team: 'npc', peerId: null });
+    useCombatStore.getState().startCombat([a, b]);
+    useCombatStore.getState().beginRound();
+    const r0 = combat().round;
+    await Promise.all([
+      useCombatStore.getState().resolveRound(),
+      useCombatStore.getState().resolveRound(),
+    ]);
+    expect(combat().round).toBe(r0 + 1);
+  });
+});

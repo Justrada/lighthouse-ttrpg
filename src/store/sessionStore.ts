@@ -125,7 +125,13 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         }
         case 'dice_roll':
           ui.recordRoll(msg.payload);
-          if (!msg.payload.secret) get().send(msg); // relay to other players
+          // Relay to the OTHER players only — the original roller already recorded
+          // it locally, so echoing it back would show them their own roll twice.
+          if (!msg.payload.secret) {
+            for (const m of get().party) {
+              if (m.peerId !== from) transport.send(m.peerId, msg);
+            }
+          }
           break;
         case 'check_result':
           ui.pushToast({

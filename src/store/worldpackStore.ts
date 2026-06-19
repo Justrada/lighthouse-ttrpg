@@ -82,8 +82,9 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
       }
     }
     if (!parsed || typeof parsed !== 'object') return null;
-    // Give imports a fresh id so they never clobber an existing local pack.
-    const pack = normalizeWorldpack({ ...(parsed as object), id: nanoid(10) });
+    // Give imports a fresh id so they never clobber an existing local pack, and
+    // land them as private drafts — the importer hasn't listed them for sale.
+    const pack = normalizeWorldpack({ ...(parsed as object), id: nanoid(10), published: false });
     set((s) => {
       const next = [...s.worldpacks, pack];
       saveJSON(KEYS.worldpacks, next);

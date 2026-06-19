@@ -264,6 +264,11 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     if (!state.isActive || state.phase !== 'declare') return;
 
     set((s) => ({ combat: { ...s.combat, phase: 'resolving' } }));
+    // Yield once so the phase flip is observable before any heavy work: a second
+    // resolveRound() issued synchronously (e.g. double-click, empty queue) will
+    // see 'resolving' and bail rather than double-advance the round.
+    await Promise.resolve();
+    if (!get().combat.isActive || get().combat.phase !== 'resolving') return;
     const reduceMotion = useUIStore.getState().reduceMotion;
     const { steps, state: afterActions } = resolveRound(state, Math.random, {
       charLookup: buildCharLookup(),

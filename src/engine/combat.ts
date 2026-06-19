@@ -946,18 +946,24 @@ function applyEffect(
       if (upperMax === 'MAX HP' || upperMax === 'MAX MP' || upperMax === 'MAX SP') {
         const maxKey = upperMax === 'MAX HP' ? 'maxHP' : upperMax === 'MAX MP' ? 'maxMP' : 'maxSP';
         const curKey = upperMax === 'MAX HP' ? 'currentHP' : upperMax === 'MAX MP' ? 'currentMP' : 'currentSP';
-        target[maxKey] = Math.max(1, target[maxKey] + value);
+        // Apply against a floor of 1 and record the ACTUAL applied delta. A debuff
+        // that clamps the pool to 1 removed less than its raw value, so the revert
+        // must undo only what was applied — storing the raw value would over-restore
+        // and permanently inflate the pool.
+        const beforeMax = target[maxKey];
+        target[maxKey] = Math.max(1, beforeMax + value);
+        const appliedDelta = target[maxKey] - beforeMax;
         // Only grant fresh current headroom to a combatant that's up. Adding
         // current HP to a downed (0-HP, unconscious) unit would leave a "zombie"
         // (HP > 0 yet unconscious), so the downed gain max only and stay down.
-        if (value >= 0) {
-          if (!target.isUnconscious) target[curKey] += value;
+        if (appliedDelta >= 0) {
+          if (!target.isUnconscious) target[curKey] += appliedDelta;
         } else {
           target[curKey] = Math.min(target[curKey], target[maxKey]);
         }
         if (effect.durationValue && (effect.durationUnit || effect.durationType)) {
           const revert = createStatusEffect(effect, { sourceId: source.id, sourceName: name, sourceTeam: source.team });
-          revert.rolledValue = value; // the max delta to undo when this expires
+          revert.rolledValue = appliedDelta; // exact delta to undo on expiry
           target.statusEffects.push(revert);
         }
         const pool = upperMax.slice(4);

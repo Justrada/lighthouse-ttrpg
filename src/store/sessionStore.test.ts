@@ -193,3 +193,34 @@ describe('sessionStore — combat snapshot ordering', () => {
     gm.destroy();
   });
 });
+
+describe('sessionStore — dice roll relay', () => {
+  it('relays a non-secret roll to other players but not back to the roller', async () => {
+    await useSessionStore.getState().hostGame('GM', 'ROOMDICE');
+    const a = createMockTransport({ role: 'player', roomCode: 'ROOMDICE' });
+    const b = createMockTransport({ role: 'player', roomCode: 'ROOMDICE' });
+    const aPid = await a.start();
+    await b.start();
+    let aGot = 0;
+    let bGot = 0;
+    a.on((e) => { if (e.type === 'message' && e.message.type === 'dice_roll') aGot += 1; });
+    b.on((e) => { if (e.type === 'message' && e.message.type === 'dice_roll') bGot += 1; });
+
+    a.broadcast({ type: 'player_join', payload: { character: validChar('pa', 'A') } });
+    b.broadcast({ type: 'player_join', payload: { character: validChar('pb', 'B') } });
+    await flush();
+
+    a.broadcast({
+      type: 'dice_roll',
+      payload: { notation: '1d20', rolls: [10], modifier: 0, total: 10, roller: 'A', secret: false } as never,
+    });
+    await flush();
+
+    expect(bGot).toBe(1); // the other player receives the relay
+    expect(aGot).toBe(0); // the roller does NOT get its own roll echoed back
+
+    void aPid;
+    a.destroy();
+    b.destroy();
+  });
+});

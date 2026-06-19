@@ -44,6 +44,8 @@ function isSupportive(range?: string, effects?: { type?: string; modification?: 
   return (effects ?? []).some(
     (e) =>
       e.type === 'Apply Healing' ||
+      e.type === 'Give Advantage/Disadvantage' ||
+      e.type === 'Substitute Cost' ||
       (e.type === 'Modify Stat' &&
         (String(e.modification).startsWith('+') || e.statToModify === 'HP')),
   );
@@ -134,11 +136,11 @@ export function buildActionOptions(character: Character | null | undefined): Act
       const item = findItem(itemId);
       if (!item || item.itemType !== 'Consumable') continue;
       const supportive = isSupportive(item.range, item.effects);
-      const offensive = (item.effects ?? []).some((e) => e.type === 'Apply Damage');
-      // A consumable that affects another combatant needs a target so it can be
-      // aimed at an ally or foe on the board. Catalog throwables carry no explicit
-      // range band, so derive "needs a target" from the effects instead.
-      const needsTarget = item.range !== 'Self' && (offensive || supportive || item.range != null);
+      // Any consumable that carries an effect can be aimed at a combatant (ally or
+      // foe — cross-target is intended). Catalog items carry no explicit range
+      // band, so derive "needs a target" from having effects, not from range. This
+      // covers buffs like Antitoxin (Give Advantage) that aren't damage or heals.
+      const needsTarget = item.range !== 'Self' && ((item.effects?.length ?? 0) > 0 || item.range != null);
       options.push({
         key: `item:${itemId}`,
         actionType: 'Use Item',

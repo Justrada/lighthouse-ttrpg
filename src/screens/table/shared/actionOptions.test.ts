@@ -35,4 +35,15 @@ describe('buildActionOptions — consumable targeting', () => {
     expect(unarmed!.actionId).toBe('unarmed-strike');
     expect(unarmed!.needsTarget).toBe(true);
   });
+
+  it('a buff consumable (Antitoxin / Give Advantage) is targetable and supportive', () => {
+    const c = autoBuildCharacter({ name: 'A', level: 3, archetype: 'balanced' });
+    c.inventory.backpack = ['inv_x_antitoxin'];
+    const anti = buildActionOptions(c).find(
+      (o) => o.actionType === 'Use Item' && o.actionId === 'inv_x_antitoxin',
+    );
+    expect(anti).toBeTruthy();
+    expect(anti!.needsTarget).toBe(true); // can be administered to an ally
+    expect(anti!.supportive).toBe(true);
+  });
 });

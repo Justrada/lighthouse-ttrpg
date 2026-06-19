@@ -83,10 +83,12 @@ export function reskinCount(pack: Worldpack): number {
 
 /** The platform's facilitation fee on a sale at `price`. */
 export function platformCut(price: number): number {
-  return Math.round(Math.max(0, price) * WORLDFORGE_FEE_RATE);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  return Math.round(price * WORLDFORGE_FEE_RATE);
 }
 
 /** What the creator keeps after the platform fee. */
 export function creatorPayout(price: number): number {
-  return Math.max(0, price) - platformCut(price);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  return price - platformCut(price);
 }

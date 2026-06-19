@@ -1,32 +1,39 @@
 import type { Worldpack } from '@/types';
 import { useWorldpackStore } from '@/store/worldpackStore';
 
-/** Trim-or-undefined helper: an empty/blank override falls back to the base. */
-function ov(s: string | undefined): string | undefined {
-  return s && s.trim() ? s : undefined;
+/** Trim-or-undefined: blank or non-string overrides fall back to the base. */
+function ov(s: unknown): string | undefined {
+  return typeof s === 'string' && s.trim() ? s : undefined;
+}
+
+/** Read an OWN property only — never the prototype chain — so ids like
+ *  'toString' or 'valueOf' resolve to undefined (and fall back) instead of
+ *  leaking inherited members or throwing. */
+function own<T>(map: Record<string, T> | undefined, key: string): T | undefined {
+  return map && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
 }
 
 // --- Pure resolvers (engine-free, testable) --------------------------------
 // Mechanics are NEVER changed by a worldpack; these resolve display text only.
 
 export function reskinNodeName(pack: Worldpack | null | undefined, id: string, fallback: string): string {
-  return ov(pack?.reskins?.nodes?.[id]?.name) ?? fallback;
+  return ov(own(pack?.reskins?.nodes, id)?.name) ?? fallback;
 }
 
 export function reskinNodeDescription(pack: Worldpack | null | undefined, id: string, fallback: string): string {
-  return ov(pack?.reskins?.nodes?.[id]?.description) ?? fallback;
+  return ov(own(pack?.reskins?.nodes, id)?.description) ?? fallback;
 }
 
 export function reskinItemName(pack: Worldpack | null | undefined, id: string, fallback: string): string {
-  return ov(pack?.reskins?.items?.[id]?.name) ?? fallback;
+  return ov(own(pack?.reskins?.items, id)?.name) ?? fallback;
 }
 
 export function reskinItemDescription(pack: Worldpack | null | undefined, id: string, fallback: string): string {
-  return ov(pack?.reskins?.items?.[id]?.description) ?? fallback;
+  return ov(own(pack?.reskins?.items, id)?.description) ?? fallback;
 }
 
 export function reskinTerm(pack: Worldpack | null | undefined, term: string, fallback: string): string {
-  return ov(pack?.reskins?.terms?.[term]) ?? fallback;
+  return ov(own(pack?.reskins?.terms, term)) ?? fallback;
 }
 
 // --- React bindings ---------------------------------------------------------
