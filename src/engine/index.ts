@@ -80,6 +80,7 @@ export {
 // Combat
 export {
   createCombatant,
+  actionSlotsFor,
   isTargetInRange,
   getAOETargets,
   rollInitiativeForRound,

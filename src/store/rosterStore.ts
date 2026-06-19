@@ -49,7 +49,7 @@ export const useRosterStore = create<RosterStore>()((set, get) => ({
       const copy: Character = {
         ...structuredClone(original),
         id: nanoid(10),
-        name: `${original.name} (copy)`,
+        name: `${original.name} (copy)`.slice(0, 40),
         portraitSeed: nanoid(8),
         createdAt: Date.now(),
         updatedAt: Date.now(),

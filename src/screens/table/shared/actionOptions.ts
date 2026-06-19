@@ -1,6 +1,6 @@
 import type { ActionType, Character, Combatant } from '@/types';
 import { findItem, findNode } from '@/data/skillTree';
-import { calculateDerivedStats } from '@/engine';
+import { actionSlotsFor } from '@/engine';
 
 /**
  * A single concrete choice a combatant can declare within an action slot —
@@ -77,23 +77,35 @@ export function buildActionOptions(character: Character | null | undefined): Act
   });
 
   if (character) {
-    // Weapon attack.
+    // Weapon attack — or a basic unarmed strike when nothing is equipped, so
+    // weaponless combatants (natural-weapon beasts, the disarmed) can still
+    // attack. The engine resolves actionId 'unarmed-strike' as a 1d4 melee hit.
     const weaponId = character.inventory?.weapon;
-    if (weaponId) {
-      const weapon = findItem(weaponId);
-      if (weapon) {
-        options.push({
-          key: `weapon:${weapon.id}`,
-          actionType: 'Weapon Attack',
-          label: weapon.name,
-          actionId: weapon.id,
-          range: weapon.range ?? 'Melee',
-          description: weapon.damage ? `${weapon.damage} ${weapon.damageType ?? ''}`.trim() : weapon.description,
-          needsTarget: true,
-          needsLine: false,
-          supportive: false,
-        });
-      }
+    const weapon = weaponId ? findItem(weaponId) : undefined;
+    if (weapon) {
+      options.push({
+        key: `weapon:${weapon.id}`,
+        actionType: 'Weapon Attack',
+        label: weapon.name,
+        actionId: weapon.id,
+        range: weapon.range ?? 'Melee',
+        description: weapon.damage ? `${weapon.damage} ${weapon.damageType ?? ''}`.trim() : weapon.description,
+        needsTarget: true,
+        needsLine: false,
+        supportive: false,
+      });
+    } else {
+      options.push({
+        key: 'weapon:unarmed',
+        actionType: 'Weapon Attack',
+        label: 'Unarmed Strike',
+        actionId: 'unarmed-strike',
+        range: 'Melee',
+        description: '1d4 melee',
+        needsTarget: true,
+        needsLine: false,
+        supportive: false,
+      });
     }
 
     // Combat-usable abilities from the learned skill tree.
@@ -122,6 +134,11 @@ export function buildActionOptions(character: Character | null | undefined): Act
       const item = findItem(itemId);
       if (!item || item.itemType !== 'Consumable') continue;
       const supportive = isSupportive(item.range, item.effects);
+      const offensive = (item.effects ?? []).some((e) => e.type === 'Apply Damage');
+      // A consumable that affects another combatant needs a target so it can be
+      // aimed at an ally or foe on the board. Catalog throwables carry no explicit
+      // range band, so derive "needs a target" from the effects instead.
+      const needsTarget = item.range !== 'Self' && (offensive || supportive || item.range != null);
       options.push({
         key: `item:${itemId}`,
         actionType: 'Use Item',
@@ -129,7 +146,7 @@ export function buildActionOptions(character: Character | null | undefined): Act
         actionId: itemId,
         range: item.range,
         description: item.description,
-        needsTarget: item.range != null && item.range !== 'Self',
+        needsTarget,
         needsLine: false,
         supportive,
       });
@@ -184,10 +201,16 @@ export function buildActionOptions(character: Character | null | undefined): Act
   return options;
 }
 
-/** Number of action slots a combatant gets this round (derived; defaults to 3). */
-export function actionSlotCount(character: Character | null | undefined): number {
-  if (!character) return 3;
-  return calculateDerivedStats(character).actionsPerRound;
+/**
+ * Number of action slots a combatant gets this round: the derived base plus any
+ * active timed "Actions per Round" effects (Rage, Hobble) when a combatant is
+ * supplied. Defaults to 3 with no character.
+ */
+export function actionSlotCount(
+  character: Character | null | undefined,
+  combatant?: Combatant | null,
+): number {
+  return actionSlotsFor(character, combatant);
 }
 
 export { ALWAYS_ACTION_TYPES };

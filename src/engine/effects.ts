@@ -125,10 +125,12 @@ export function createStatusEffect(
  * `processDurationEffects`, minus the per-effect re-saving (which the engine's
  * combat resolution handles where it applies).
  *
- * This is the *end-of-round* tick, so it only counts down effects measured in
- * `Rounds` (or with no unit — treated as Rounds). Effects measured in `Actions`
- * (e.g. `Stunned`) are decremented on the per-action path during resolution and
- * are left untouched here, so they don't expire roughly twice as fast.
+ * Counts down at end of round for BOTH `Rounds` and `Actions` units (and the
+ * unspecified default). The single exception is `Stunned`, which is ticked on
+ * the per-action path during resolution and is left untouched here so it doesn't
+ * decrement twice. `Permanent` effects never expire. (Previously only `Rounds`
+ * counted down, so every non-Stun `Actions`-unit effect — most DoTs and combat
+ * buffs/debuffs — never expired and ticked forever.)
  */
 export function tickDurations(combatant: Combatant): ActiveStatusEffect[] {
   const effects = (combatant.statusEffects ?? []) as RuntimeEffect[];
@@ -136,10 +138,9 @@ export function tickDurations(combatant: Combatant): ActiveStatusEffect[] {
 
   for (const effect of effects) {
     const unit = effect.durationUnit ?? effect.durationType;
-    // Only end-of-round (Rounds / unspecified) effects count down here.
-    // 'Actions' is handled per-action; 'Permanent' never expires.
-    const isRounds = unit === 'Rounds' || unit === undefined;
-    if (!isRounds || typeof effect.durationValue !== 'number') {
+    // 'Permanent' never expires; 'Stunned' is ticked per-action during
+    // resolution; effects with no numeric duration are left as-is.
+    if (unit === 'Permanent' || effect.type === 'Stunned' || typeof effect.durationValue !== 'number') {
       next.push(effect);
       continue;
     }

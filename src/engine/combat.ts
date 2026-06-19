@@ -151,6 +151,39 @@ export interface CreateCombatantOptions {
  * battlefield placement via {@link deployHexes}. Death saves start zeroed; a
  * character entering at 0 HP starts unconscious — matching the original setup.
  */
+/** Fallback weapon profile for weaponless combatants (natural-weapon beasts,
+ *  the disarmed) so a Weapon Attack still resolves — a 1d4 melee strike. */
+const UNARMED_STRIKE: WorldItem = {
+  id: 'unarmed-strike',
+  type: 'Inventory Item',
+  name: 'Unarmed Strike',
+  description: 'A desperate swing — fists, claws, or fangs.',
+  itemType: 'Weapon',
+  range: 'Melee',
+  effects: [{ id: 'unarmed-dmg', type: 'Apply Damage', useWeaponDamage: true }],
+};
+
+/**
+ * A combatant's action slots this round: its derived base plus any active timed
+ * "Actions per Round" Modify-Stat effects (e.g. Rage +1, Hobble -1). The UI and
+ * the network slot-cap read this so live buffs actually grant/remove actions.
+ */
+export function actionSlotsFor(
+  character: Character | null | undefined,
+  combatant?: Combatant | null,
+): number {
+  const base = character ? calculateDerivedStats(character).actionsPerRound : 3;
+  let bonus = 0;
+  for (const raw of combatant?.statusEffects ?? []) {
+    const e = raw as RuntimeEffect;
+    if (e.type !== 'Modify Stat') continue;
+    if (String(e.statToModify).toUpperCase() !== 'ACTIONS PER ROUND') continue;
+    if (typeof e.durationValue === 'number' && e.durationValue <= 0) continue;
+    bonus += typeof e.rolledValue === 'number' ? e.rolledValue : parseInt(String(e.modification), 10) || 0;
+  }
+  return Math.max(1, base + bonus);
+}
+
 export function createCombatant(
   character: Character,
   opts: CreateCombatantOptions,
@@ -366,8 +399,9 @@ function isSupportive(data: UsableData): boolean {
   if ((data.effects ?? []).some((e) => e.type === 'Apply Damage')) return false;
   return (data.effects ?? []).some(
     (e) =>
-      e.type === 'Modify Stat' &&
-      (String(e.modification).startsWith('+') || e.statToModify === 'HP'),
+      e.type === 'Apply Healing' ||
+      (e.type === 'Modify Stat' &&
+        (String(e.modification).startsWith('+') || e.statToModify === 'HP')),
   );
 }
 
@@ -905,16 +939,27 @@ function applyEffect(
       if (effect.isHalved) value = Math.floor(value / 2);
 
       // Max-pool buffs (e.g. War Cry's "+1d10 Max HP") adjust the combatant's
-      // max and current pools for the encounter. effectiveStats never reads a
-      // lingering "Max HP" effect, so apply it directly here instead of letting
-      // it become an inert duration effect.
+      // max pool. effectiveStats never reads a "Max HP" effect, so apply it
+      // directly. A *timed* buff also stores a revert token that processEndOfRound
+      // undoes on expiry; an untimed one is a permanent encounter change.
       const upperMax = statKey.toUpperCase();
       if (upperMax === 'MAX HP' || upperMax === 'MAX MP' || upperMax === 'MAX SP') {
         const maxKey = upperMax === 'MAX HP' ? 'maxHP' : upperMax === 'MAX MP' ? 'maxMP' : 'maxSP';
         const curKey = upperMax === 'MAX HP' ? 'currentHP' : upperMax === 'MAX MP' ? 'currentMP' : 'currentSP';
         target[maxKey] = Math.max(1, target[maxKey] + value);
-        if (value >= 0) target[curKey] += value; // grant the new headroom
-        else target[curKey] = Math.min(target[curKey], target[maxKey]);
+        // Only grant fresh current headroom to a combatant that's up. Adding
+        // current HP to a downed (0-HP, unconscious) unit would leave a "zombie"
+        // (HP > 0 yet unconscious), so the downed gain max only and stay down.
+        if (value >= 0) {
+          if (!target.isUnconscious) target[curKey] += value;
+        } else {
+          target[curKey] = Math.min(target[curKey], target[maxKey]);
+        }
+        if (effect.durationValue && (effect.durationUnit || effect.durationType)) {
+          const revert = createStatusEffect(effect, { sourceId: source.id, sourceName: name, sourceTeam: source.team });
+          revert.rolledValue = value; // the max delta to undo when this expires
+          target.statusEffects.push(revert);
+        }
         const pool = upperMax.slice(4);
         pushLog(log, round, `${target.name}'s maximum ${pool} ${value >= 0 ? 'rises' : 'falls'} by ${Math.abs(value)}.`, value >= 0 ? 'success' : 'danger');
         results.push({ kind: value >= 0 ? 'heal' : 'effect', amount: Math.abs(value), text: `${target.name} ${value >= 0 ? '+' : '-'}${Math.abs(value)} max ${pool}`, targetId: target.id });
@@ -980,23 +1025,15 @@ function applyEffect(
     }
 
     case 'Move Target': {
-      let apply = true;
-      if (effect.savingThrowEnabled && typeof effect.saveSkill === 'string') {
-        const dc = Number(effect.saveDC) || 0;
-        const save = rollSavingThrow(target, effect.saveSkill, dc, rng, ctx.charLookup?.(target));
-        pushLog(log, round, `${target.name} rolls ${effect.saveSkill} save: ${save.total} vs DC ${dc}.`, 'muted');
-        if (save.success && effect.saveOutcome === 'Negate') {
-          apply = false;
-          pushLog(log, round, `Save successful — movement negated.`, 'success');
-        }
-      }
-      if (apply) {
-        const move = moveTarget(ctx.state, target, source, effect.direction as string, Number(effect.rows) || 0);
-        if (move.moved) {
-          const word = effect.direction === 'Away From' ? 'pushed away' : 'pulled closer';
-          pushLog(log, round, `${target.name} is ${word}.`, 'beam');
-          results.push({ kind: 'move', text: `${target.name} ${word}`, targetId: target.id });
-        }
+      // Any saving throw is already resolved upstream by processSavingThrows: a
+      // successful Negate save drops this effect before it reaches here, and a
+      // failed save lets it through. Re-rolling here was double jeopardy, so just
+      // apply the shove.
+      const move = moveTarget(ctx.state, target, source, effect.direction as string, Number(effect.rows) || 0);
+      if (move.moved) {
+        const word = effect.direction === 'Away From' ? 'pushed away' : 'pulled closer';
+        pushLog(log, round, `${target.name} is ${word}.`, 'beam');
+        results.push({ kind: 'move', text: `${target.name} ${word}`, targetId: target.id });
       }
       break;
     }
@@ -1292,7 +1329,9 @@ function resolveUsable(
   const name = data.name ?? 'an ability';
 
   const supportive = (data.effects ?? []).some(
-    (e) => e.type === 'Modify Stat' && ['HP', 'MP', 'SP'].includes(String(e.statToModify)),
+    (e) =>
+      e.type === 'Apply Healing' ||
+      (e.type === 'Modify Stat' && ['HP', 'MP', 'SP'].includes(String(e.statToModify))),
   );
 
   if (
@@ -1537,13 +1576,11 @@ export function resolveAction(
     }
 
     case 'Weapon Attack': {
-      // A mid-combat equipment swap overrides the declared weapon id.
+      // A mid-combat equipment swap overrides the declared weapon id. Weaponless
+      // combatants (natural-weapon beasts, the disarmed) fall back to an unarmed
+      // strike so they can still attack instead of no-opping.
       const weaponId = source.equippedWeaponId ?? action.actionId;
-      const weapon = weaponId ? findItem(weaponId) : undefined;
-      if (!weapon) {
-        pushLog(log, round, `${source.name} tries to attack, but the weapon wasn't found.`, 'muted');
-        break;
-      }
+      const weapon = (weaponId ? findItem(weaponId) : undefined) ?? UNARMED_STRIKE;
       if (!target) {
         pushLog(log, round, `${source.name} swings ${weapon.name}, but has no target.`, 'muted');
         break;
@@ -1628,6 +1665,17 @@ function applyDamageOverTime(
  * duration effects down on every combatant, drop expired ones, clear transient
  * Guard, and advance the round counter. Returns a new state.
  */
+/** Undo a timed Max-pool buff/debuff when its effect expires: shift the max back
+ *  by the stored delta and re-clamp the current pool. */
+function revertMaxPoolEffect(c: Combatant, e: RuntimeEffect): void {
+  const stat = String(e.statToModify ?? '').toUpperCase();
+  const maxKey = stat === 'MAX HP' ? 'maxHP' : stat === 'MAX MP' ? 'maxMP' : stat === 'MAX SP' ? 'maxSP' : null;
+  if (!maxKey || typeof e.rolledValue !== 'number' || e.rolledValue === 0) return;
+  const curKey = maxKey === 'maxHP' ? 'currentHP' : maxKey === 'maxMP' ? 'currentMP' : 'currentSP';
+  c[maxKey] = Math.max(1, c[maxKey] - e.rolledValue);
+  c[curKey] = Math.min(c[curKey], c[maxKey]);
+}
+
 export function processEndOfRound(state: CombatState): CombatState {
   const next = cloneState(state);
   const round = next.round;
@@ -1635,9 +1683,16 @@ export function processEndOfRound(state: CombatState): CombatState {
   for (const combatant of next.combatants) {
     // Apply DoTs first (using this round's remaining duration), then tick.
     applyDamageOverTime(combatant, round, log);
-    combatant.statusEffects = tickDurations(combatant).filter(
+    const before = (combatant.statusEffects ?? []) as RuntimeEffect[];
+    const survivors = tickDurations(combatant).filter(
       (e) => (e as RuntimeEffect).type !== 'Guarding',
-    );
+    ) as RuntimeEffect[];
+    // Revert any timed Max-pool buff/debuff that just expired this tick.
+    const surviving = new Set(survivors.map((e) => e.id));
+    for (const e of before) {
+      if (!surviving.has(e.id)) revertMaxPoolEffect(combatant, e);
+    }
+    combatant.statusEffects = survivors;
     combatant.isGuarding = false;
   }
   next.log = [...next.log, ...log];

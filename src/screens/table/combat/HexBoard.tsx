@@ -117,7 +117,7 @@ export function HexBoard({
     activeActorId ? Boolean(s.combat.lockedActions[activeActorId]) : false,
   );
 
-  const slotCount = useMemo(() => actionSlotCount(actorChar), [actorChar]);
+  const slotCount = useMemo(() => actionSlotCount(actorChar, actor), [actorChar, actor]);
   const usedSlots = declared?.length ?? 0;
   const nextFreeSlot = useMemo(() => {
     const taken = new Set((declared ?? []).map((a) => a.actionIndex));
@@ -258,7 +258,11 @@ export function HexBoard({
         const outOfStock = remaining !== undefined && remaining <= 0;
         const inRange =
           !outOfStock &&
-          (isSelf || !opt.needsTarget ? true : isTargetInRange(actor, target, opt.range));
+          (isSelf || !opt.needsTarget
+            ? true
+            : opt.range
+              ? isTargetInRange(actor, target, opt.range)
+              : true); // no range band (e.g. a thrown consumable) → always reachable
         return {
           option: opt,
           inRange,

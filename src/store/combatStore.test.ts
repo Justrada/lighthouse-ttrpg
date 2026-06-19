@@ -183,3 +183,12 @@ describe('combatStore — rebindCombatantPeer (reconnect)', () => {
     expect(find('c1').peerId).toBe('new-peer');
   });
 });
+
+describe('combatStore — deploy overflow', () => {
+  it('gives every combatant a unique position even past a team deploy cap', () => {
+    const many = Array.from({ length: 80 }, (_, i) => mkCombatant({ id: `n${i}`, team: 'npc', peerId: null }));
+    useCombatStore.getState().startCombat(many);
+    const keys = combat().combatants.map((c) => `${c.position.q},${c.position.r}`);
+    expect(new Set(keys).size).toBe(80); // no stacking at {0,0}
+  });
+});

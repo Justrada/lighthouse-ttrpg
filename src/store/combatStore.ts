@@ -8,7 +8,7 @@ import type {
   DeclaredAction,
 } from '@/types';
 import type { CombatStore } from './contracts';
-import { resolveRound, processEndOfRound, deployHexes, calculateDerivedStats } from '@/engine';
+import { resolveRound, processEndOfRound, deployHexes, gridHexes, actionSlotsFor } from '@/engine';
 import { CONDITIONS, BATTLE_GRID } from '@/data/constants';
 import { useSessionStore } from './sessionStore';
 import { useRosterStore } from './rosterStore';
@@ -68,17 +68,28 @@ function placeCombatants(combatants: Combatant[]): Combatant[] {
   for (const c of combatants) byTeam[c.team].push(c);
 
   const positionFor = new Map<string, Combatant['position']>();
+  const used = new Set<string>();
   (Object.keys(byTeam) as Combatant['team'][]).forEach((team) => {
     const team_members = byTeam[team];
     const hexes = deployHexes(team, team_members.length, BATTLE_GRID);
     team_members.forEach((c, i) => {
       const hex = hexes[i];
-      if (hex) positionFor.set(c.id, hex);
+      if (hex) {
+        positionFor.set(c.id, hex);
+        used.add(`${hex.q},${hex.r}`);
+      }
     });
   });
 
+  // Overflow past a team's deploy capacity would otherwise stack at {0,0}; give
+  // any leftover combatant the next free hex anywhere on the grid.
+  const allHexes = gridHexes(BATTLE_GRID);
   return combatants.map((c) => {
-    const hex = positionFor.get(c.id);
+    let hex = positionFor.get(c.id);
+    if (!hex) {
+      hex = allHexes.find((h) => !used.has(`${h.q},${h.r}`));
+      if (hex) used.add(`${hex.q},${hex.r}`);
+    }
     return hex ? { ...c, position: hex } : c;
   });
 }
@@ -110,7 +121,7 @@ function slotCountFor(combatantId: string, combatants: Combatant[]): number {
   const c = combatants.find((x) => x.id === combatantId);
   if (!c) return 3;
   const ch = buildCharLookup()(c);
-  return ch ? calculateDerivedStats(ch).actionsPerRound : 3;
+  return actionSlotsFor(ch, c);
 }
 
 export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({

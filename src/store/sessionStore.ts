@@ -154,11 +154,17 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
           })),
         });
         break;
-      case 'combat_start':
-        // A new fight always applies and re-baselines the sequence counter.
-        lastRxSeq = msg.payload.seq ?? lastRxSeq;
+      case 'combat_start': {
+        // Drop a replayed/reordered opening snapshot. A genuine new fight always
+        // carries a strictly-higher seq (the GM's txSeq only increments), so a
+        // seq <= the last applied one can only be a stale duplicate — which would
+        // otherwise resurrect ended combat and rewind the ordering gate.
+        const seq = msg.payload.seq;
+        if (seq != null && seq <= lastRxSeq) break;
+        if (seq != null) lastRxSeq = seq;
         combat.ingest(normalizeCombatState(msg.payload?.combat));
         break;
+      }
       case 'combat_update': {
         // Drop stale/reordered snapshots so an old update can't rewind state or
         // resurrect combat after a newer snapshot (or combat_end) was applied.

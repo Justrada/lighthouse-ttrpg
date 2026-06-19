@@ -29,4 +29,12 @@ describe('draftStore — overspend guard', () => {
     expect(saved).not.toBeNull();
     expect(useRosterStore.getState().characters).toHaveLength(1);
   });
+
+  it('caps a committed name at 40 characters', () => {
+    useDraftStore.getState().startNew();
+    useDraftStore.getState().setName('Z'.repeat(120));
+    const saved = useDraftStore.getState().commit();
+    expect(saved).not.toBeNull();
+    expect(saved!.name.length).toBe(40);
+  });
 });

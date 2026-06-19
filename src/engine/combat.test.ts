@@ -8,6 +8,7 @@ import type {
 } from '@/types';
 import {
   createCombatant,
+  actionSlotsFor,
   resolveAction,
   resolveRound,
   processEndOfRound,
@@ -15,6 +16,7 @@ import {
   isTargetInRange,
   rollInitiativeForRound,
 } from './combat';
+import { tickDurations } from './effects';
 import { hexDistance } from './hex';
 import type { Rng } from './dice';
 
@@ -951,5 +953,104 @@ describe('max-pool buffs', () => {
     const m = after.combatants.find((c) => c.id === 'mage')!;
     expect(m.maxHP).toBeGreaterThan(beforeMax);
     expect(m.currentHP).toBeGreaterThan(beforeCur);
+  });
+});
+
+describe('duration expiry (Actions-unit effects)', () => {
+  it('an Actions-unit DoT ticks for its duration then expires (no longer forever)', () => {
+    const victim = createCombatant(makeCharacter({ id: 'v', currentHP: 100 }), { team: 'npc', position: hex(0, 0) });
+    victim.statusEffects = [
+      { id: 'burn', type: 'Apply Damage', label: 'Burn', durationType: 'Actions', durationUnit: 'Actions', durationValue: 3, rolledDamage: 5 } as never,
+    ];
+    const bystander = createCombatant(makeCharacter({ id: 'b' }), { team: 'player', position: hex(7, 6) });
+    let state: CombatState = { ...makeState(victim, bystander), combatants: [victim, bystander] };
+    for (let i = 0; i < 5; i += 1) state = processEndOfRound(state);
+    const v = state.combatants.find((c) => c.id === 'v')!;
+    expect(v.currentHP).toBe(100 - 5 * 3); // exactly 3 ticks, then gone
+    expect(v.statusEffects.some((e) => typeof (e as { rolledDamage?: number }).rolledDamage === 'number')).toBe(false);
+  });
+
+  it('tickDurations leaves Stunned for the per-action path but counts other Actions effects', () => {
+    const c = createCombatant(makeCharacter({ id: 'c' }), { team: 'npc', position: hex(0, 0) });
+    c.statusEffects = [
+      { id: 's', type: 'Stunned', label: 'Stunned', durationUnit: 'Actions', durationValue: 2 } as never,
+      { id: 'd', type: 'Modify Stat', label: 'Slow', statToModify: 'Initiative', durationUnit: 'Actions', durationValue: 2, rolledValue: -2 } as never,
+    ];
+    const after = tickDurations(c);
+    expect((after.find((e) => e.id === 's') as { durationValue?: number })?.durationValue).toBe(2);
+    expect((after.find((e) => e.id === 'd') as { durationValue?: number })?.durationValue).toBe(1);
+  });
+});
+
+describe('timed Max-pool buffs revert on expiry', () => {
+  const heroWithPotion = () =>
+    makeCharacter({ id: 'h', inventory: { armor: null, weapon: null, shield: null, accessories: [], backpack: ['inv_x_potion_of_heroism'] } });
+
+  it('a 5-round Max HP buff (Potion of Heroism) reverts after it expires', () => {
+    const hero = createCombatant(heroWithPotion(), { team: 'player', position: hex(0, 0) });
+    const baseMax = hero.maxHP;
+    const foe = createCombatant(makeCharacter({ id: 'f', name: 'F' }), { team: 'npc', position: hex(1, 0) });
+    let state: CombatState = { ...makeState(hero, foe) };
+    state = resolveAction(state, action({ actionType: 'Use Item', sourceId: 'h', targetId: 'h', actionId: 'inv_x_potion_of_heroism' }), maxRng).state;
+    expect(state.combatants.find((c) => c.id === 'h')!.maxHP).toBe(baseMax + 5);
+    for (let i = 0; i < 6; i += 1) state = processEndOfRound(state);
+    expect(state.combatants.find((c) => c.id === 'h')!.maxHP).toBe(baseMax);
+  });
+
+  it('a Max-pool buff on a downed combatant raises max only — no "zombie"', () => {
+    const healer = createCombatant(heroWithPotion(), { team: 'player', position: hex(1, 0) });
+    const downed = createCombatant(makeCharacter({ id: 'd' }), { team: 'player', position: hex(0, 0) });
+    downed.currentHP = 0;
+    downed.isUnconscious = true;
+    downed.deathSaves = { successes: 1, failures: 2 };
+    const baseMax = downed.maxHP;
+    let state: CombatState = { ...makeState(healer, downed), combatants: [healer, downed] };
+    state = resolveAction(state, action({ actionType: 'Use Item', sourceId: 'h', targetId: 'd', actionId: 'inv_x_potion_of_heroism' }), maxRng).state;
+    const d = state.combatants.find((c) => c.id === 'd')!;
+    expect(d.maxHP).toBe(baseMax + 5); // max rose
+    expect(d.currentHP).toBe(0); // but stayed down
+    expect(d.isUnconscious).toBe(true);
+  });
+});
+
+describe('Apply Healing is supportive', () => {
+  it('an Apply Healing AOE reaches downed allies (revivable)', () => {
+    const caster = createCombatant(makeCharacter({ id: 'c' }), { team: 'player', position: hex(0, 0) });
+    const ally = createCombatant(makeCharacter({ id: 'a' }), { team: 'player', position: hex(4, 0) }); // primary
+    const downed = createCombatant(makeCharacter({ id: 'd' }), { team: 'player', position: hex(5, 0) });
+    downed.currentHP = 0;
+    downed.isUnconscious = true;
+    const state: CombatState = { ...makeState(caster, ally), combatants: [caster, ally, downed] };
+    const usable = { name: 'Mass Mend', range: 'Far', aoe: 'AOE 3', hitType: 'Auto Hit', effects: [{ type: 'Apply Healing', statToModify: 'HP', modification: '+2d6' }] } as never;
+    const ids = getAOETargets(state, ally, 'AOE 3', caster, usable).map((t) => t.id).sort();
+    expect(ids).toContain('d');
+    expect(ids).toContain('a');
+  });
+});
+
+describe('unarmed strike fallback', () => {
+  it('a weaponless combatant can still attack (1d4 unarmed)', () => {
+    const beast = createCombatant(makeCharacter({ id: 'rat', inventory: { armor: null, weapon: null, shield: null, accessories: [], backpack: [] } }), { team: 'npc', position: hex(0, 0) });
+    const hero = createCombatant(makeCharacter({ id: 'hero', currentHP: 40 }), { team: 'player', position: hex(1, 0) });
+    const state: CombatState = { ...makeState(hero, beast), combatants: [hero, beast] };
+    const { state: after, results } = resolveAction(
+      state,
+      action({ actionType: 'Weapon Attack', sourceId: 'rat', targetId: 'hero' }),
+      maxRng,
+    );
+    expect(after.combatants.find((c) => c.id === 'hero')!.currentHP).toBeLessThan(40);
+    expect(results.some((r) => r.kind === 'hit')).toBe(true);
+  });
+});
+
+describe('actionSlotsFor — live Actions-per-Round buffs', () => {
+  it('counts an active Rage-style "+1 Actions per Round" effect', () => {
+    const ch = makeCharacter({ id: 'r' });
+    const c = createCombatant(ch, { team: 'player', position: hex(0, 0) });
+    expect(actionSlotsFor(ch, c)).toBe(3);
+    c.statusEffects = [
+      { id: 'rage', type: 'Modify Stat', label: 'Rage', statToModify: 'Actions per Round', durationUnit: 'Actions', durationValue: 3, rolledValue: 1 } as never,
+    ];
+    expect(actionSlotsFor(ch, c)).toBe(4);
   });
 });

@@ -193,7 +193,11 @@ export const useDraftStore = create<DraftStore>()((set, get) => {
       // what the current stats + skills already cost). The UI shows a clearer
       // message before this point; this is the safety net for every caller.
       if (calculateSkillBudget(d).available < 0) return null;
-      const finalized: Character = { ...d, name: d.name.trim() || 'Unnamed Hero', updatedAt: Date.now() };
+      const finalized: Character = {
+        ...d,
+        name: (d.name.trim() || 'Unnamed Hero').slice(0, 40),
+        updatedAt: Date.now(),
+      };
       useRosterStore.getState().upsert(finalized);
       return finalized;
     },

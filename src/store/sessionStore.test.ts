@@ -158,4 +158,38 @@ describe('sessionStore — combat snapshot ordering', () => {
 
     gm.destroy();
   });
+
+  it('drops a replayed combat_start that would resurrect ended combat', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMSTART' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMSTART', validChar('pc', 'P'), 'P');
+    await flush();
+
+    const active = {
+      isActive: true,
+      phase: 'declare',
+      round: 1,
+      combatants: [],
+      declaredActions: {},
+      lockedActions: {},
+      resolutionQueue: [],
+      activeResolutionIndex: -1,
+      log: [],
+    };
+
+    gm.broadcast({ type: 'combat_start', payload: { combat: active as never, seq: 10 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(true);
+
+    gm.broadcast({ type: 'combat_end', payload: { seq: 11 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(false);
+
+    // A replayed/reordered OLDER opening snapshot must not resurrect combat.
+    gm.broadcast({ type: 'combat_start', payload: { combat: active as never, seq: 9 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(false);
+
+    gm.destroy();
+  });
 });
