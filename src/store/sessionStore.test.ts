@@ -15,6 +15,7 @@ import { useSessionStore } from './sessionStore';
 import { useCombatStore } from './combatStore';
 import { createMockTransport, __resetMockBuses, type Transport } from '@/net';
 import { createCombatant } from '@/engine';
+import { performRoll } from './actions';
 import type { Character } from '@/types';
 
 const flush = async (rounds = 3) => {
@@ -221,6 +222,26 @@ describe('sessionStore — dice roll relay', () => {
 
     void aPid;
     a.destroy();
+    b.destroy();
+  });
+
+  it('never broadcasts a secret roll to the table', async () => {
+    await useSessionStore.getState().hostGame('GM', 'ROOMSECRET');
+    const b = createMockTransport({ role: 'player', roomCode: 'ROOMSECRET' });
+    await b.start();
+    let bGot = 0;
+    b.on((e) => { if (e.type === 'message' && e.message.type === 'dice_roll') bGot += 1; });
+    b.broadcast({ type: 'player_join', payload: { character: validChar('pb', 'B') } });
+    await flush();
+
+    performRoll({ notation: '1d20', secret: true });
+    await flush();
+    expect(bGot).toBe(0); // secret roll stays with the roller
+
+    performRoll({ notation: '1d20', secret: false });
+    await flush();
+    expect(bGot).toBe(1); // a normal roll does reach the table
+
     b.destroy();
   });
 });

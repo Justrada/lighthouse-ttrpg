@@ -48,20 +48,39 @@ const TEXT_FILL: Record<NodeVisualState, string> = {
 
 /** Wrap a label into up to three short lines for the circular face. */
 function wrapLabel(label: string): string[] {
-  const words = label.split(/\s+/);
-  if (words.length === 1) return [label];
+  const MAX = 11; // chars per line
+  const MAX_LINES = 3;
   const lines: string[] = [];
   let cur = '';
-  for (const w of words) {
-    if ((cur + ' ' + w).trim().length > 11 && cur) {
+  const flush = () => {
+    if (cur) {
       lines.push(cur);
-      cur = w;
-    } else {
-      cur = (cur + ' ' + w).trim();
+      cur = '';
+    }
+  };
+  for (let word of label.split(/\s+/).filter(Boolean)) {
+    if (lines.length >= MAX_LINES) break;
+    // Hard-break a single word longer than one line (e.g. a long reskin name).
+    while (word.length > MAX && lines.length < MAX_LINES) {
+      flush();
+      lines.push(word.slice(0, MAX));
+      word = word.slice(MAX);
+    }
+    if (lines.length >= MAX_LINES) break;
+    if (!cur) cur = word;
+    else if ((cur + ' ' + word).length <= MAX) cur += ' ' + word;
+    else {
+      flush();
+      cur = word;
     }
   }
-  if (cur) lines.push(cur);
-  return lines.slice(0, 3);
+  if (cur && lines.length < MAX_LINES) lines.push(cur);
+  const out = lines.slice(0, MAX_LINES);
+  // Ellipsize the last line if the whole label didn't fit.
+  if (out.length && out.join(' ').replace(/\s+/g, '').length < label.replace(/\s+/g, '').length) {
+    out[out.length - 1] = out[out.length - 1].slice(0, MAX - 1) + '…';
+  }
+  return out.length ? out : [label.slice(0, MAX)];
 }
 
 function SkillNodeShapeInner({

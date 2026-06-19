@@ -41,4 +41,10 @@ describe('worldpackStore', () => {
     expect(copy!.published).toBe(false);
     expect(copy!.name).toContain('copy');
   });
+
+  it('rejects a JSON array of packs (no silent junk pack)', () => {
+    const arr = JSON.stringify([createEmptyWorldpack({ name: 'A' }), createEmptyWorldpack({ name: 'B' })]);
+    expect(useWorldpackStore.getState().importPack(arr)).toBeNull();
+    expect(useWorldpackStore.getState().worldpacks).toHaveLength(0);
+  });
 });

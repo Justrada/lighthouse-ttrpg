@@ -43,3 +43,10 @@ describe('marketplace fee math', () => {
     expect(platformCut(-10)).toBe(0);
   });
 });
+
+describe('price clamp', () => {
+  it('clamps an astronomically large price to the ceiling', () => {
+    expect(normalizeWorldpack({ price: 1e21 } as unknown as Worldpack).price).toBe(1_000_000);
+    expect(normalizeWorldpack({ price: 999999999999 } as unknown as Worldpack).price).toBe(1_000_000);
+  });
+});

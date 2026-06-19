@@ -28,7 +28,10 @@ export function performRoll(opts: RollOptions): DiceRollResult & { roller: strin
   const roller = rollerName();
   const result = { ...base, roller };
   useUIStore.getState().recordRoll(result);
-  useSessionStore.getState().send({ type: 'dice_roll', payload: { ...base, roller, secret: opts.secret } });
+  // Secret rolls stay local to the roller — never broadcast them to the table.
+  if (!opts.secret) {
+    useSessionStore.getState().send({ type: 'dice_roll', payload: { ...base, roller, secret: false } });
+  }
   return result;
 }
 

@@ -96,7 +96,9 @@ function resolveStatTarget(
   if (!stat) return null;
   if (stat === 'PC choose core skill' || stat === 'PC choose resource') {
     const choices = character.skillChoices?.[nodeId];
-    const choice = choices?.find((c) => c.effectId === effect.id)?.choice;
+    const choice = Array.isArray(choices)
+      ? choices.find((c) => c.effectId === effect.id)?.choice
+      : undefined;
     return choice ?? null;
   }
   return stat;

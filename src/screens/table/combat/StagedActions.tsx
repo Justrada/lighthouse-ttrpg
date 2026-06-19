@@ -68,7 +68,7 @@ export function StagedActions({ actorId, className }: StagedActionsProps) {
     [combatants, actorId],
   );
   const character = useCombatantCharacter(actor);
-  const slotCount = useMemo(() => actionSlotCount(character), [character]);
+  const slotCount = useMemo(() => actionSlotCount(character, actor), [character, actor]);
 
   const combatantsById = useMemo(
     () => new Map(combatants.map((c) => [c.id, c])),

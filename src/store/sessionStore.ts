@@ -89,7 +89,7 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
             // A reconnecting player is assigned a fresh peer id; rebind their
             // existing combatant (matched by the stable character id) to it so
             // they regain control instead of being locked out under the old id.
-            combat.rebindCombatantPeer(character.id, from);
+            combat.rebindCombatantPeer(character.id, from, new Set(get().party.map((m) => m.peerId)));
             transport.send(from, {
               type: 'combat_update',
               payload: { combat: useCombatStore.getState().combat },
@@ -195,7 +195,8 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         }
         break;
       case 'dice_roll':
-        ui.recordRoll(msg.payload);
+        // Secret rolls are never meant for other players; ignore any that slip through.
+        if (!msg.payload.secret) ui.recordRoll(msg.payload);
         break;
       case 'log':
         combat.appendLog(msg.payload);

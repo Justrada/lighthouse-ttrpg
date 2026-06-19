@@ -248,7 +248,9 @@ function PackEditor({ initial, isActive, onClose }: PackEditorProps) {
       setDraft((d) => {
         const map = { ...d.reskins[kind] };
         const merged = { ...map[id], ...entry };
-        if (!merged.name && !merged.description) delete map[id];
+        // Treat a whitespace-only override as empty (matches save-time cleaning)
+        // so the reskin count and "renamed" marker don't lie.
+        if (!merged.name?.trim() && !merged.description?.trim()) delete map[id];
         else map[id] = merged;
         return { ...d, reskins: { ...d.reskins, [kind]: map } };
       });
@@ -336,6 +338,7 @@ function PackEditor({ initial, isActive, onClose }: PackEditorProps) {
                       <Input
                         value={draft.reskins.terms[t.key] ?? ''}
                         placeholder={t.label}
+                        maxLength={60}
                         onChange={(e) => setTerm(t.key, e.target.value)}
                       />
                     </label>
@@ -378,7 +381,7 @@ function DetailsSection({ draft, patch }: { draft: Worldpack; patch: (p: Partial
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <Labeled label="System name">
-        <Input value={draft.name} placeholder="Untitled System" onChange={(e) => patch({ name: e.target.value })} />
+        <Input value={draft.name} placeholder="Untitled System" maxLength={80} onChange={(e) => patch({ name: e.target.value })} />
       </Labeled>
       <Labeled label="Author">
         <Input value={draft.author} placeholder="Your name / handle" onChange={(e) => patch({ author: e.target.value })} />
@@ -388,6 +391,7 @@ function DetailsSection({ draft, patch }: { draft: Worldpack; patch: (p: Partial
           value={draft.description}
           placeholder="What's the theme? Sci-fi? Mythic? Grimdark?"
           rows={3}
+          maxLength={600}
           onChange={(e) => patch({ description: e.target.value })}
         />
       </Labeled>
@@ -400,7 +404,7 @@ function DetailsSection({ draft, patch }: { draft: Worldpack; patch: (p: Partial
           min={0}
           mono
           value={String(draft.price)}
-          onChange={(e) => patch({ price: Math.max(0, Math.trunc(Number(e.target.value) || 0)) })}
+          onChange={(e) => patch({ price: Math.max(0, Math.min(1_000_000, Math.trunc(Number(e.target.value) || 0))) })}
         />
       </Labeled>
       {draft.price > 0 && (
@@ -442,11 +446,13 @@ const ReskinRow = memo(function ReskinRow({
         <Input
           value={entry?.name ?? ''}
           placeholder={target.baseName}
+          maxLength={120}
           onChange={(e) => onChange({ name: e.target.value })}
         />
         <Input
           value={entry?.description ?? ''}
           placeholder={target.baseDescription || 'Custom description…'}
+          maxLength={600}
           onChange={(e) => onChange({ description: e.target.value })}
         />
       </div>

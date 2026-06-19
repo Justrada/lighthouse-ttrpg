@@ -19,7 +19,7 @@ import { findNpcTemplate } from '@/data/npcTemplates';
 export interface CombatStoreImpl extends CombatStore {
   applyRemoteDeclare: (combatantId: string, actions: DeclaredAction[]) => void;
   applyRemoteLock: (combatantId: string, locked: boolean) => void;
-  rebindCombatantPeer: (characterId: string, peerId: string) => void;
+  rebindCombatantPeer: (characterId: string, peerId: string, connectedPeerIds?: Set<string>) => void;
   appendLog: (entry: CombatLogEntry) => void;
   forceResolve: () => void;
   reset: () => void;
@@ -116,6 +116,24 @@ function buildCharLookup(): (c: Combatant) => Character | undefined {
   };
 }
 
+/** Ensure every combatant has a unique id — two players who imported the same
+ *  character (same id) would otherwise share one combatant id and thus share
+ *  placement, resources, and declared actions. Keeps characterId intact. */
+function uniquifyCombatantIds(combatants: Combatant[]): Combatant[] {
+  const seen = new Set<string>();
+  return combatants.map((c) => {
+    if (!seen.has(c.id)) {
+      seen.add(c.id);
+      return c;
+    }
+    let n = 2;
+    while (seen.has(`${c.id}#${n}`)) n += 1;
+    const id = `${c.id}#${n}`;
+    seen.add(id);
+    return { ...c, id };
+  });
+}
+
 /** How many action slots a combatant gets this round (derived; defaults to 3). */
 function slotCountFor(combatantId: string, combatants: Combatant[]): number {
   const c = combatants.find((x) => x.id === combatantId);
@@ -128,7 +146,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   combat: emptyCombat(),
 
   startCombat: (combatants) => {
-    const placed = placeCombatants(combatants);
+    const placed = placeCombatants(uniquifyCombatantIds(combatants));
     const combat: CombatState = {
       ...emptyCombat(),
       isActive: true,
@@ -291,10 +309,18 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     // Settle the round: tick durations, advance round, clear declarations.
     const accumulatedLog = get().combat.log;
     const settled = processEndOfRound({ ...afterActions, log: accumulatedLog });
+    // Preserve peerId rebinds that happened during the animation (e.g. a player
+    // reconnecting mid-resolution) — `settled` came from the pre-animation snapshot.
+    const livePeerByChar = new Map(get().combat.combatants.map((c) => [c.characterId ?? c.id, c.peerId]));
+    const reboundCombatants = settled.combatants.map((c) => {
+      const key = c.characterId ?? c.id;
+      return livePeerByChar.has(key) ? { ...c, peerId: livePeerByChar.get(key) ?? c.peerId } : c;
+    });
     const nextRoundLog = [...settled.log, logEntry(settled.round, `— Round ${settled.round} —`, 'arcane')];
     set({
       combat: {
         ...settled,
+        combatants: reboundCombatants,
         phase: 'declare',
         declaredActions: {},
         lockedActions: {},
@@ -360,7 +386,15 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
           if (combatantId && c.id !== combatantId) return c;
           if (!combatantId && c.team !== 'player') return c;
           if (kind === 'long') {
-            return { ...c, currentHP: c.maxHP, currentMP: c.maxMP, currentSP: c.maxSP, isUnconscious: false };
+            if (c.isDead) return c; // a long rest doesn't raise the truly dead
+            return {
+              ...c,
+              currentHP: c.maxHP,
+              currentMP: c.maxMP,
+              currentSP: c.maxSP,
+              isUnconscious: false,
+              deathSaves: { successes: 0, failures: 0 },
+            };
           }
           return {
             ...c,
@@ -433,13 +467,16 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
 
   /** Rebind a combatant to a (possibly new) peer id, matched by stable character
    *  id — used when a player reconnects under a fresh PeerJS id mid-combat. */
-  rebindCombatantPeer: (characterId, peerId) => {
+  rebindCombatantPeer: (characterId, peerId, connectedPeerIds) => {
     let changed = false;
     set((s) => ({
       combat: {
         ...s.combat,
         combatants: s.combat.combatants.map((c) => {
-          if (c.characterId === characterId && c.peerId !== peerId) {
+          // Only rebind an ORPHANED combatant (its prior owner is gone) so a peer
+          // can't hijack a still-connected player's unit by claiming their id.
+          const orphaned = c.peerId == null || !connectedPeerIds || !connectedPeerIds.has(c.peerId);
+          if (c.characterId === characterId && c.peerId !== peerId && orphaned) {
             changed = true;
             return { ...c, peerId };
           }

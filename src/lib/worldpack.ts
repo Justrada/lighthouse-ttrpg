@@ -66,7 +66,7 @@ export function normalizeWorldpack(raw: unknown): Worldpack {
       items: cleanReskinMap(reskins.items),
       terms: cleanTerms(reskins.terms),
     },
-    price: Number.isFinite(r.price as number) ? Math.max(0, Math.trunc(r.price as number)) : 0,
+    price: Number.isFinite(r.price as number) ? Math.max(0, Math.min(1_000_000, Math.trunc(r.price as number))) : 0,
     published: Boolean(r.published),
     license: typeof r.license === 'string' ? r.license.slice(0, 120) : undefined,
   };

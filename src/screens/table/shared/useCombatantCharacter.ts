@@ -53,9 +53,16 @@ export function useCombatantCharacter(combatant: Combatant | null | undefined): 
     // Honor a mid-combat equipment swap: surface the swapped weapon's attack and
     // armory by overriding the equipped slot on a clone (never mutate the source).
     if (combatant.equippedWeaponId != null && combatant.equippedWeaponId !== base.inventory.weapon) {
+      const original = base.inventory.weapon;
+      const backpack = base.inventory.backpack ?? [];
       return {
         ...base,
-        inventory: { ...base.inventory, weapon: combatant.equippedWeaponId },
+        inventory: {
+          ...base.inventory,
+          weapon: combatant.equippedWeaponId,
+          // Keep the displaced weapon available so Change Equipment can swap back to it.
+          backpack: original && !backpack.includes(original) ? [...backpack, original] : backpack,
+        },
       };
     }
     return base;

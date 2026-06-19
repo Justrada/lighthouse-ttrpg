@@ -14,7 +14,10 @@ export function loadJSON<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(PREFIX + key);
     if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw);
+    // A stored literal "null" parses to null — treat it as missing so callers
+    // that read properties off the result can't crash on it.
+    return parsed == null ? fallback : (parsed as T);
   } catch {
     return fallback;
   }

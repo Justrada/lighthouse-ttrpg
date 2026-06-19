@@ -43,6 +43,14 @@ export function normalizeCharacter(raw: Partial<Character> | null | undefined): 
 
   const name = (typeof r.name === 'string' ? r.name.trim().slice(0, MAX_NAME) : '') || 'Unnamed Hero';
 
+  // Keep only well-formed choice arrays; a corrupted non-array value would crash
+  // calculateDerivedStats (which calls .find on it).
+  const rawChoices = (r.skillChoices && typeof r.skillChoices === 'object' ? r.skillChoices : {}) as Record<string, unknown>;
+  const skillChoices: NonNullable<Character['skillChoices']> = {};
+  for (const [k, v] of Object.entries(rawChoices)) {
+    if (Array.isArray(v)) skillChoices[k] = v as NonNullable<Character['skillChoices']>[string];
+  }
+
   return {
     id: typeof r.id === 'string' && r.id ? r.id : nanoid(10),
     name,
@@ -54,7 +62,7 @@ export function normalizeCharacter(raw: Partial<Character> | null | undefined): 
       soul: clampInt(r.coreStats?.soul, STAT_MIN, STAT_MAX, 4),
     },
     learnedSkills,
-    skillChoices: r.skillChoices && typeof r.skillChoices === 'object' ? r.skillChoices : {},
+    skillChoices,
     inventory: {
       armor: typeof inv.armor === 'string' ? inv.armor : null,
       weapon: typeof inv.weapon === 'string' ? inv.weapon : null,

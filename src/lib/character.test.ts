@@ -81,4 +81,12 @@ describe('normalizeCharacter', () => {
     expect(c.currentMP).toBe(0);
     expect(c.currentSP).toBe(0);
   });
+
+  it('drops non-array skillChoices values so corrupt data cannot crash stats', () => {
+    const c = normalizeCharacter({
+      skillChoices: { 'node-1': [{ effectId: 'e', choice: 'Lore' }], 'node-2': { bad: true } },
+    } as unknown as Character);
+    expect(Array.isArray(c.skillChoices!['node-1'])).toBe(true);
+    expect(c.skillChoices!['node-2']).toBeUndefined(); // non-array dropped
+  });
 });

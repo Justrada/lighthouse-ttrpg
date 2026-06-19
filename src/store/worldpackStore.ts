@@ -81,7 +81,7 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
         return null;
       }
     }
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     // Give imports a fresh id so they never clobber an existing local pack, and
     // land them as private drafts — the importer hasn't listed them for sale.
     const pack = normalizeWorldpack({ ...(parsed as object), id: nanoid(10), published: false });

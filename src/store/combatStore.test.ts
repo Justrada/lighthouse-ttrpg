@@ -207,3 +207,40 @@ describe('combatStore — double-resolve guard (empty queue)', () => {
     expect(combat().round).toBe(r0 + 1);
   });
 });
+
+describe('combatStore — unique combatant ids', () => {
+  it('de-dups ids when two combatants share one (same imported character)', () => {
+    const a = mkCombatant({ id: 'hero', team: 'player', peerId: 'pA', characterId: 'hero' });
+    const b = mkCombatant({ id: 'hero', team: 'player', peerId: 'pB', characterId: 'hero' });
+    useCombatStore.getState().startCombat([a, b]);
+    const ids = combat().combatants.map((c) => c.id);
+    expect(new Set(ids).size).toBe(2); // unique combatant ids
+    expect(combat().combatants.every((c) => c.characterId === 'hero')).toBe(true); // characterId preserved
+  });
+});
+
+describe('combatStore — long rest recovery', () => {
+  it('resets death saves and does not raise the dead', () => {
+    const downed = mkCombatant({ id: 'd1', currentHP: 0, isUnconscious: true, deathSaves: { successes: 1, failures: 3 } });
+    const dead = mkCombatant({ id: 'd2', currentHP: 0, isDead: true });
+    useCombatStore.getState().startCombat([downed, dead]);
+    useCombatStore.getState().applyRest('long');
+    expect(find('d1').currentHP).toBe(find('d1').maxHP);
+    expect(find('d1').isUnconscious).toBe(false);
+    expect(find('d1').deathSaves).toEqual({ successes: 0, failures: 0 });
+    expect(find('d2').isDead).toBe(true); // a long rest doesn't revive a corpse
+  });
+});
+
+describe('combatStore — rebind ownership guard', () => {
+  it('does not rebind a combatant whose owner is still connected', () => {
+    const c = mkCombatant({ id: 'c1', team: 'player', peerId: 'owner', characterId: 'char-1' });
+    useCombatStore.getState().startCombat([c]);
+    // 'owner' still connected → an attacker claiming char-1 must NOT steal it.
+    useCombatStore.getState().rebindCombatantPeer('char-1', 'attacker', new Set(['owner', 'attacker']));
+    expect(find('c1').peerId).toBe('owner');
+    // A genuine reconnect (old owner gone) does rebind.
+    useCombatStore.getState().rebindCombatantPeer('char-1', 'newpeer', new Set(['newpeer']));
+    expect(find('c1').peerId).toBe('newpeer');
+  });
+});
