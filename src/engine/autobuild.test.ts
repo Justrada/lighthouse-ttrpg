@@ -128,4 +128,16 @@ describe('autoBuildCharacter', () => {
     }
     expect(signatures.size).toBeGreaterThan(1);
   });
+
+  it('keeps the archetype primary stat the highest (magic→mind, skill→body)', () => {
+    for (const s of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const mage = autoBuildCharacter({ name: 'M', level: 10, archetype: 'magic', rng: seeded(s) });
+      expect(mage.coreStats.mind).toBeGreaterThanOrEqual(mage.coreStats.soul);
+      expect(mage.coreStats.mind).toBeGreaterThanOrEqual(mage.coreStats.body);
+
+      const rogue = autoBuildCharacter({ name: 'S', level: 10, archetype: 'skill', rng: seeded(s) });
+      expect(rogue.coreStats.body).toBeGreaterThanOrEqual(rogue.coreStats.mind);
+      expect(rogue.coreStats.body).toBeGreaterThanOrEqual(rogue.coreStats.soul);
+    }
+  });
 });

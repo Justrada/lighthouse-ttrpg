@@ -902,6 +902,23 @@ function applyEffect(
       let value = cache.stats[statKey];
       if (effect.isHalved) value = Math.floor(value / 2);
 
+      // Max-pool buffs (e.g. War Cry's "+1d10 Max HP") adjust the combatant's
+      // max and current pools for the encounter. effectiveStats never reads a
+      // lingering "Max HP" effect, so apply it directly here instead of letting
+      // it become an inert duration effect.
+      const upperMax = statKey.toUpperCase();
+      if (upperMax === 'MAX HP' || upperMax === 'MAX MP' || upperMax === 'MAX SP') {
+        const maxKey = upperMax === 'MAX HP' ? 'maxHP' : upperMax === 'MAX MP' ? 'maxMP' : 'maxSP';
+        const curKey = upperMax === 'MAX HP' ? 'currentHP' : upperMax === 'MAX MP' ? 'currentMP' : 'currentSP';
+        target[maxKey] = Math.max(1, target[maxKey] + value);
+        if (value >= 0) target[curKey] += value; // grant the new headroom
+        else target[curKey] = Math.min(target[curKey], target[maxKey]);
+        const pool = upperMax.slice(4);
+        pushLog(log, round, `${target.name}'s maximum ${pool} ${value >= 0 ? 'rises' : 'falls'} by ${Math.abs(value)}.`, value >= 0 ? 'success' : 'danger');
+        results.push({ kind: value >= 0 ? 'heal' : 'effect', amount: Math.abs(value), text: `${target.name} ${value >= 0 ? '+' : '-'}${Math.abs(value)} max ${pool}`, targetId: target.id });
+        break;
+      }
+
       if (effect.durationValue && (effect.durationUnit || effect.durationType)) {
         const statEffect = createStatusEffect(effect, {
           sourceId: source.id,
@@ -929,6 +946,21 @@ function applyEffect(
           results.push({ kind: 'effect', amount: value, text: `${target.name} -${Math.abs(value)} ${upper}`, targetId: target.id });
         }
       }
+      break;
+    }
+
+    case 'Apply Healing': {
+      const res = String(effect.statToModify ?? 'HP').toUpperCase();
+      const pool: 'HP' | 'MP' | 'SP' = res === 'MP' ? 'MP' : res === 'SP' ? 'SP' : 'HP';
+      let amount = roll(String(effect.modification ?? '0'), rng).total;
+      if (effect.isHalved) amount = Math.floor(amount / 2);
+      if (amount < 0) amount = 0;
+      const beforeRes = pool === 'HP' ? target.currentHP : pool === 'MP' ? target.currentMP : target.currentSP;
+      modifyResource(target, pool, amount);
+      const afterRes = pool === 'HP' ? target.currentHP : pool === 'MP' ? target.currentMP : target.currentSP;
+      pushLog(log, round, `${target.name} is healed for ${amount} ${pool}.`, 'success');
+      results.push({ kind: 'heal', amount: Math.max(0, afterRes - beforeRes), text: `${target.name} +${amount} ${pool}`, targetId: target.id });
+      target.lastActionResult = { kind: 'heal', amount, text: `+${amount} ${pool}` };
       break;
     }
 

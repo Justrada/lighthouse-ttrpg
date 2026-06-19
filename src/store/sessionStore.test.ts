@@ -118,3 +118,44 @@ describe('sessionStore — network trust boundary', () => {
     expect(allyAfter.currentMP).toBe(0); // not a party-wide heal
   });
 });
+
+describe('sessionStore — combat snapshot ordering', () => {
+  it('drops a stale combat_update that arrives after a newer snapshot / combat_end', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMSEQ' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMSEQ', validChar('pc', 'P'), 'P');
+    await flush();
+
+    const activeCombat = {
+      isActive: true,
+      phase: 'declare',
+      round: 1,
+      combatants: [],
+      declaredActions: {},
+      lockedActions: {},
+      resolutionQueue: [],
+      activeResolutionIndex: -1,
+      log: [],
+    };
+
+    gm.broadcast({ type: 'combat_start', payload: { combat: activeCombat as never, seq: 5 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(true);
+
+    gm.broadcast({ type: 'combat_end', payload: { seq: 6 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(false);
+
+    // A reordered, older update must NOT resurrect the ended combat.
+    gm.broadcast({ type: 'combat_update', payload: { combat: activeCombat as never, seq: 4 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(false);
+
+    // A genuinely newer snapshot still applies.
+    gm.broadcast({ type: 'combat_update', payload: { combat: activeCombat as never, seq: 7 } });
+    await flush();
+    expect(useCombatStore.getState().combat.isActive).toBe(true);
+
+    gm.destroy();
+  });
+});

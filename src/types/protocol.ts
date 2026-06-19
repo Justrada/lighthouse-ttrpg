@@ -16,10 +16,10 @@ export type GameMessage =
   | { type: 'character_update'; payload: { character: Character } }
   | { type: 'party_sync'; payload: { members: { peerId: string; character: Character }[] } }
   // --- combat lifecycle ---
-  | { type: 'combat_start'; payload: { combat: CombatState } }
-  | { type: 'combat_update'; payload: { combat: CombatState } }
+  | { type: 'combat_start'; payload: { combat: CombatState; seq?: number } }
+  | { type: 'combat_update'; payload: { combat: CombatState; seq?: number } }
   | { type: 'combat_patch'; payload: Partial<CombatState> }
-  | { type: 'combat_end'; payload: Record<string, never> }
+  | { type: 'combat_end'; payload: { seq?: number } }
   | { type: 'declare_actions'; payload: { combatantId: string; actions: DeclaredAction[] } }
   | { type: 'lock_actions'; payload: { combatantId: string; locked: boolean } }
   // --- resources / state nudges ---

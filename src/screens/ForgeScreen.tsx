@@ -94,6 +94,15 @@ export default function ForgeScreen() {
         body: `${saved.name} joined your roster.`,
         tone: 'success',
       });
+      // Gentle, non-blocking heads-up about easy-to-miss gaps.
+      const gaps: string[] = [];
+      if (!saved.inventory.weapon) gaps.push('no weapon equipped');
+      if (!saved.inventory.armor) gaps.push('no armor equipped');
+      if (budget.available > 0)
+        gaps.push(`${budget.available} point${budget.available === 1 ? '' : 's'} unspent`);
+      if (gaps.length) {
+        pushToast({ title: 'Heads up', body: `${saved.name} has ${gaps.join(' · ')}.`, tone: 'warn' });
+      }
       navigate('/roster');
     } else {
       pushToast({ title: 'Nothing to save', tone: 'warn' });

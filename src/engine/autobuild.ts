@@ -61,6 +61,13 @@ const STAT_WEIGHTS: Record<Archetype, Record<CoreStatKey, number>> = {
   balanced: { mind: 1, body: 1, soul: 1 },
 };
 
+/** The defining stat per archetype (balanced has none). */
+const PRIMARY_STAT: Record<Archetype, CoreStatKey | null> = {
+  magic: 'mind',
+  skill: 'body',
+  balanced: null,
+};
+
 /** Pick a key from a weight map using `r` in [0,1). Returns null if all weights 0. */
 function weightedPick<T extends string>(
   weights: Record<string, number>,
@@ -132,6 +139,18 @@ function allocateStats(character: Character, archetype: Archetype, rng: () => nu
     if (cost > remaining) break;
     coreStats[choice] += 1;
     spentOnRaises += cost;
+  }
+
+  // Guarantee the archetype's primary stat ends up highest, so weighted-random
+  // drift never leaves a "Mind-forged" mage reading as Soul-dominant.
+  const primary = PRIMARY_STAT[archetype];
+  if (primary) {
+    const top = CORE_KEYS.reduce((a, b) => (coreStats[b] > coreStats[a] ? b : a));
+    if (coreStats[top] > coreStats[primary]) {
+      const swap = coreStats[primary];
+      coreStats[primary] = coreStats[top];
+      coreStats[top] = swap;
+    }
   }
 
   return { ...character, coreStats };

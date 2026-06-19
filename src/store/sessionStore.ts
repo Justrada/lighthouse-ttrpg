@@ -26,6 +26,11 @@ export interface SessionStoreImpl extends SessionStore {
 }
 
 export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
+  // Highest combat-snapshot sequence this client (as a player) has applied, so
+  // stale/reordered GM messages can be dropped. Reset on leave / re-baselined
+  // by each combat_start.
+  let lastRxSeq = -1;
+
   /** Subscribe a transport to this store and the network router. */
   function wire(transport: Transport) {
     transport.on((e: TransportEvent) => {
@@ -150,13 +155,27 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         });
         break;
       case 'combat_start':
-      case 'combat_update':
+        // A new fight always applies and re-baselines the sequence counter.
+        lastRxSeq = msg.payload.seq ?? lastRxSeq;
         combat.ingest(normalizeCombatState(msg.payload?.combat));
         break;
-      case 'combat_end':
+      case 'combat_update': {
+        // Drop stale/reordered snapshots so an old update can't rewind state or
+        // resurrect combat after a newer snapshot (or combat_end) was applied.
+        const seq = msg.payload.seq;
+        if (seq != null && seq <= lastRxSeq) break;
+        if (seq != null) lastRxSeq = seq;
+        combat.ingest(normalizeCombatState(msg.payload?.combat));
+        break;
+      }
+      case 'combat_end': {
+        const seq = msg.payload.seq;
+        if (seq != null && seq < lastRxSeq) break; // ignore a stale end
+        if (seq != null) lastRxSeq = seq;
         combat.reset();
         ui.pushToast({ title: 'Combat has ended', tone: 'arcane' });
         break;
+      }
       case 'check_request':
         if (msg.payload.targetPeerId === get().selfPeerId) {
           set({ pendingCheck: { id: msg.payload.id, skill: msg.payload.skill, dc: msg.payload.dc } });
@@ -240,6 +259,7 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
     },
 
     leave: () => {
+      lastRxSeq = -1;
       get().transport?.destroy();
       useCombatStore.getState().reset();
       set({

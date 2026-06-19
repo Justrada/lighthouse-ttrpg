@@ -903,3 +903,22 @@ describe('consumable charges', () => {
     expect(r2.results.some((x) => /no .*remaining/i.test(x.text))).toBe(true);
   });
 });
+
+describe('max-pool buffs', () => {
+  it('raises the combatant max and current pool (Magic Armor II)', () => {
+    const caster = createCombatant(makeCharacter({ id: 'mage' }), { team: 'player', position: hex(0, 0) });
+    caster.currentMP = 99; // node-57 (Magic Armor II) costs 8 MP, grants +2d10 Max HP
+    const beforeMax = caster.maxHP;
+    const beforeCur = caster.currentHP;
+    const foe = createCombatant(makeCharacter({ id: 'foe', name: 'Foe' }), { team: 'npc', position: hex(1, 0) });
+    const state = makeState(caster, foe);
+    const { state: after } = resolveAction(
+      state,
+      action({ actionType: 'Use Ability', sourceId: 'mage', targetId: 'mage', actionId: 'node-57' }),
+      maxRng,
+    );
+    const m = after.combatants.find((c) => c.id === 'mage')!;
+    expect(m.maxHP).toBeGreaterThan(beforeMax);
+    expect(m.currentHP).toBeGreaterThan(beforeCur);
+  });
+});

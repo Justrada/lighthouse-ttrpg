@@ -46,9 +46,14 @@ function logEntry(round: number, text: string, tone?: CombatLogEntry['tone']): C
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const isGM = () => useSessionStore.getState().role === 'gm';
 
+// Monotonic id stamped on every outbound combat snapshot so players can drop
+// stale/reordered messages — a late update must not resurrect ended combat.
+let txSeq = 0;
+const nextSeq = (): number => (txSeq += 1);
+
 /** Push authoritative combat state to the network (GM → players). */
 function broadcast(combat: CombatState) {
-  if (isGM()) useSessionStore.getState().send({ type: 'combat_update', payload: { combat } });
+  if (isGM()) useSessionStore.getState().send({ type: 'combat_update', payload: { combat, seq: nextSeq() } });
 }
 
 /**
@@ -122,7 +127,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
       log: [logEntry(1, '⚔️ Combat staged. Position your combatants, then begin the round.', 'beam')],
     };
     set({ combat });
-    if (isGM()) useSessionStore.getState().send({ type: 'combat_start', payload: { combat } });
+    if (isGM()) useSessionStore.getState().send({ type: 'combat_start', payload: { combat, seq: nextSeq() } });
   },
 
   /** Leave the setup/placement phase and start round 1's declarations. GM only. */
@@ -172,7 +177,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   },
 
   endCombat: () => {
-    if (isGM()) useSessionStore.getState().send({ type: 'combat_end', payload: {} });
+    if (isGM()) useSessionStore.getState().send({ type: 'combat_end', payload: { seq: nextSeq() } });
     // Reset synchronously so any in-flight resolveRound loop sees isActive=false and
     // aborts on its next tick (prevents combat "resurrecting" after End Combat).
     set({ combat: emptyCombat() });
