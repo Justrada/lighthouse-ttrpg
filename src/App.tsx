@@ -8,10 +8,11 @@ import TableScreen from './screens/TableScreen';
 import WorldforgeScreen from './screens/WorldforgeScreen';
 import MarketplaceScreen from './screens/MarketplaceScreen';
 import { AppOverlays } from './components/system/AppOverlays';
+import { ErrorBoundary } from './components/system/ErrorBoundary';
 
 export default function App() {
   return (
-    <>
+    <ErrorBoundary>
       <Routes>
         <Route path="/" element={<HomeScreen />} />
         <Route path="/roster" element={<RosterScreen />} />
@@ -25,6 +26,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <AppOverlays />
-    </>
+    </ErrorBoundary>
   );
 }

@@ -311,11 +311,14 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     const settled = processEndOfRound({ ...afterActions, log: accumulatedLog });
     // Preserve peerId rebinds that happened during the animation (e.g. a player
     // reconnecting mid-resolution) — `settled` came from the pre-animation snapshot.
-    const livePeerByChar = new Map(get().combat.combatants.map((c) => [c.characterId ?? c.id, c.peerId]));
-    const reboundCombatants = settled.combatants.map((c) => {
-      const key = c.characterId ?? c.id;
-      return livePeerByChar.has(key) ? { ...c, peerId: livePeerByChar.get(key) ?? c.peerId } : c;
-    });
+    // Key by the unique combatant id (NOT the possibly-shared characterId) so two
+    // players using the same character keep distinct ownership. Ids are stable
+    // through processEndOfRound and a mid-resolution reconnect rebinds the live
+    // combatant in place, so this still preserves reconnects.
+    const livePeerById = new Map(get().combat.combatants.map((c) => [c.id, c.peerId]));
+    const reboundCombatants = settled.combatants.map((c) =>
+      livePeerById.has(c.id) ? { ...c, peerId: livePeerById.get(c.id) ?? c.peerId } : c,
+    );
     const nextRoundLog = [...settled.log, logEntry(settled.round, `— Round ${settled.round} —`, 'arcane')];
     set({
       combat: {

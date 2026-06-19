@@ -244,3 +244,17 @@ describe('combatStore — rebind ownership guard', () => {
     expect(find('c1').peerId).toBe('newpeer');
   });
 });
+
+describe('combatStore — duplicate-character ownership survives settle', () => {
+  it('keeps each shared-character combatant on its own peer after a round resolves', async () => {
+    const a = mkCombatant({ id: 'hero', team: 'player', peerId: 'P1', characterId: 'hero' });
+    const b = mkCombatant({ id: 'hero', team: 'player', peerId: 'P2', characterId: 'hero' });
+    const npc = mkCombatant({ id: 'n1', team: 'npc', peerId: null });
+    useSessionStore.setState({ role: 'gm', party: [member('P1'), member('P2')] });
+    useCombatStore.getState().startCombat([a, b, npc]);
+    useCombatStore.getState().beginRound();
+    await useCombatStore.getState().resolveRound();
+    const peers = combat().combatants.filter((c) => c.team === 'player').map((c) => c.peerId).sort();
+    expect(peers).toEqual(['P1', 'P2']); // not collapsed onto one peer
+  });
+});

@@ -681,14 +681,17 @@ function applyDamageWithSubstitute(combatant: Combatant, damage: number): Damage
   combatant.currentHP = Math.max(1, currentHP - actualHP);
   combatant[subKey] = Math.max(0, (combatant[subKey] ?? 0) - actualSub);
 
+  let extraHP = 0;
   if (actualSub < overflow && combatant[subKey] === 0) {
-    const remaining = overflow - actualSub;
-    combatant.currentHP = Math.max(0, combatant.currentHP - remaining);
-    affected.HP += remaining;
+    extraHP = overflow - actualSub;
+    combatant.currentHP = Math.max(0, combatant.currentHP - extraHP);
+    affected.HP += extraHP;
   }
 
   checkUnconscious(combatant);
-  return { actualDamage: actualHP + actualSub, affected };
+  // Include the overflow that fell back onto HP after the substitute pool was
+  // exhausted, so the reported damage (and any drain credit) matches reality.
+  return { actualDamage: actualHP + actualSub + extraHP, affected };
 }
 
 /** Add to a combatant resource, clamping to [0, max]; revives KO at >0 HP heal. */
@@ -932,10 +935,14 @@ function applyEffect(
 
     case 'Modify Stat': {
       const statKey = String(effect.statToModify);
-      if (cache.stats[statKey] === undefined) {
-        cache.stats[statKey] = roll(String(effect.modification), rng).total;
+      // Cache the roll per EFFECT (not per stat) so two effects on the same stat
+      // each roll/parse independently, while one effect still shares a single roll
+      // across its AOE targets — mirroring the per-effect Apply Damage cache.
+      const skey = effect.id || statKey;
+      if (cache.stats[skey] === undefined) {
+        cache.stats[skey] = roll(String(effect.modification), rng).total;
       }
-      let value = cache.stats[statKey];
+      let value = cache.stats[skey];
       if (effect.isHalved) value = Math.floor(value / 2);
 
       // Max-pool buffs (e.g. War Cry's "+1d10 Max HP") adjust the combatant's

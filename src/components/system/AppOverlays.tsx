@@ -31,8 +31,13 @@ export function AppOverlays() {
           allowSecret
           quickModifiers={[-1, 0, 1, 2, 3]}
           onRoll={(notation, mode, secret) => {
-            const m = /^\s*1?d20\s*([+-]\s*\d+)?\s*$/i.exec(notation);
-            if (m || mode !== 'normal') {
+            const trimmed = notation.trim();
+            const m = /^\s*1?d20\s*([+-]\s*\d+)?\s*$/i.exec(trimmed);
+            // Advantage/disadvantage only applies to a d20. Route to the d20 path
+            // for a d20 notation OR an empty input (the "roll a d20 with advantage"
+            // case); any other notation (e.g. 2d6+3) keeps its dice instead of
+            // being silently replaced by a d20.
+            if (m || trimmed === '') {
               const modifier = m && m[1] ? parseInt(m[1].replace(/\s+/g, ''), 10) : 0;
               performRoll({ d20: { mode, modifier }, secret });
             } else {

@@ -51,7 +51,9 @@ export function parseDiceNotation(notation: string): ParsedDice | null {
   const m = s.match(DICE_RE);
   if (!m) return null;
 
-  const count = parseInt(m[1], 10) || 1;
+  // Cap the dice count so a pasted/typed huge notation (e.g. 999999999d6) can't
+  // freeze the tab building a giant array. Real rolls never need more than this.
+  const count = Math.min(1000, Math.max(1, parseInt(m[1], 10) || 1));
   const sides = parseInt(m[2], 10);
   // A die must have at least one face. "1d0"/"d0" is nonsensical and previously
   // made rollDie(0) return 1 for any rng; reject it so callers treat it like

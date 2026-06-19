@@ -19,7 +19,11 @@ export function normalizeCombatState(raw: unknown): CombatState {
     isActive: Boolean(r.isActive),
     phase: PHASES.includes(r.phase as CombatPhase) ? (r.phase as CombatPhase) : 'declare',
     round: Number.isFinite(r.round as number) ? (r.round as number) : 1,
-    combatants: Array.isArray(r.combatants) ? r.combatants : [],
+    // Keep only real combatant objects — a null/garbage entry from the wire would
+    // crash every selector that reads `.team`/`.peerId`/`.position` off each one.
+    combatants: Array.isArray(r.combatants)
+      ? r.combatants.filter((c) => !!c && typeof c === 'object')
+      : [],
     declaredActions: obj(r.declaredActions, {}),
     lockedActions: obj(r.lockedActions, {}),
     resolutionQueue: Array.isArray(r.resolutionQueue) ? r.resolutionQueue : [],

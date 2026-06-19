@@ -320,7 +320,14 @@ function PackEditor({ initial, isActive, onClose }: PackEditorProps) {
       </div>
 
       <div className="relative z-10 mb-5">
-        <SegmentedControl value={section} onChange={(v) => setSection(v as Section)} options={SECTIONS} />
+        <SegmentedControl
+          value={section}
+          onChange={(v) => {
+            setSection(v as Section);
+            setQuery(''); // the search box is shared; clear it when changing sections
+          }}
+          options={SECTIONS}
+        />
       </div>
 
       <div className="relative z-10 space-y-4">

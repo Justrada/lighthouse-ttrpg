@@ -245,3 +245,28 @@ describe('sessionStore — dice roll relay', () => {
     b.destroy();
   });
 });
+
+describe('sessionStore — room code + party-sync hardening', () => {
+  it('falls back to a generated code when a custom code normalizes to empty', async () => {
+    const code = await useSessionStore.getState().hostGame('GM', 'OIL'); // all-ambiguous chars
+    expect(code).not.toBe('');
+    expect(useSessionStore.getState().roomCode).toBe(code);
+  });
+
+  it('rejects joining with an empty/ambiguous room code', async () => {
+    await expect(
+      useSessionStore.getState().joinGame('OIL', validChar('p', 'P'), 'P'),
+    ).rejects.toThrow();
+  });
+
+  it('normalizes party_sync members so a malformed one cannot crash renders', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMPS' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMPS', validChar('me', 'Me'), 'Me');
+    await flush();
+    gm.broadcast({ type: 'party_sync', payload: { members: [{ peerId: 'x', character: { id: 'bad', name: 'Bad' } as never }] } });
+    await flush();
+    expect(useSessionStore.getState().party[0].character.learnedSkills).toContain('center-0');
+    gm.destroy();
+  });
+});

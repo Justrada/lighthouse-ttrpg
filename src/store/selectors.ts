@@ -19,13 +19,16 @@ export function useDerived(character: Character | null | undefined): DerivedStat
 export function useMyCombatant(): Combatant | undefined {
   const selfPeerId = useSessionStore((s) => s.selfPeerId);
   const activeId = useSessionStore((s) => s.activeCharacter?.id);
-  return useCombatStore((s) =>
-    s.combat.combatants.find(
-      (c) =>
-        (selfPeerId != null && c.peerId === selfPeerId) ||
-        (activeId != null && c.characterId === activeId),
-    ),
-  );
+  return useCombatStore((s) => {
+    const cs = s.combat.combatants;
+    // peerId is the definitive per-connection identity and must win; the
+    // characterId fallback only covers the reconnect window before a fresh peer
+    // id is bound. (Two players sharing one character id would otherwise resolve
+    // to each other's combatant.)
+    const byPeer = selfPeerId != null ? cs.find((c) => c.peerId === selfPeerId) : undefined;
+    if (byPeer) return byPeer;
+    return activeId != null ? cs.find((c) => c.characterId === activeId) : undefined;
+  });
 }
 
 export function usePlayerCombatants(): Combatant[] {

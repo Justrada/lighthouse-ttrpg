@@ -41,4 +41,10 @@ describe('normalizeCombatState', () => {
     expect(c.lockedActions).toEqual({ a: true });
     expect(c.activeResolutionIndex).toBe(2);
   });
+
+  it('drops non-object combatant entries from a hostile snapshot', () => {
+    const c = normalizeCombatState({ combatants: [null, { id: 'x', team: 'player' }, 'bad', 42] } as never);
+    expect(c.combatants).toHaveLength(1);
+    expect((c.combatants[0] as { id?: string }).id).toBe('x');
+  });
 });

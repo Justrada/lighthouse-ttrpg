@@ -151,13 +151,18 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
     switch (msg.type) {
       case 'party_sync':
         set({
-          party: msg.payload.members.map((m) => ({
-            peerId: m.peerId,
-            name: m.character.name,
-            character: m.character,
-            status: 'connected' as ConnectionStatus,
-            lastSeen: Date.now(),
-          })),
+          party: msg.payload.members.map((m) => {
+            // Normalize each member like every other peer-data boundary, so a
+            // malformed member can't crash PartyPanel via calculateDerivedStats.
+            const character = normalizeCharacter(m.character);
+            return {
+              peerId: m.peerId,
+              name: character.name,
+              character,
+              status: 'connected' as ConnectionStatus,
+              lastSeen: Date.now(),
+            };
+          }),
         });
         break;
       case 'combat_start': {
@@ -222,7 +227,9 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
 
     hostGame: async (gmName, roomCode) => {
       if (get().transport) get().leave(); // tear down any prior session first
-      const code = roomCode ? normalizeRoomCode(roomCode) : generateRoomCode();
+      // An all-ambiguous custom code (e.g. "OIL") normalizes to ''; fall back to a
+      // generated code rather than hosting an empty/invalid room.
+      const code = (roomCode && normalizeRoomCode(roomCode)) || generateRoomCode();
       const transport = createTransport({ role: 'gm', roomCode: code });
       wire(transport);
       set({ role: 'gm', roomCode: code, selfName: gmName, status: 'connecting', transport, party: [] });
@@ -240,6 +247,7 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
     joinGame: async (roomCode, character, playerName) => {
       if (get().transport) get().leave(); // tear down any prior session first
       const code = normalizeRoomCode(roomCode);
+      if (!code) throw new Error('Enter a valid room code (letters A–Z and digits 2–9).');
       const safeCharacter = normalizeCharacter(character);
       const transport = createTransport({ role: 'player', roomCode: code });
       wire(transport);
