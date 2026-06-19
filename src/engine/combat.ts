@@ -1081,21 +1081,31 @@ function applyDrain(
   if (!targetResource || !selfResource) return;
 
   const tKey = `current${targetResource}` as ResourceKey;
-  const available = target[tKey] ?? 0;
-  let actualDrained = Math.min(drainedAmount, available);
-  if (targetResource === 'HP' && actualDrained > 0) {
-    actualDrained = Math.min(actualDrained, Math.max(0, available - 1));
+  let actualDrained: number;
+  if (targetResource === 'HP') {
+    // The 'Apply Damage' step already removed this HP from the target — applyDrain
+    // is only ever called right after applyDamageWithSubstitute. Draining HP must
+    // NOT subtract a second time; it only transfers a share of the damage already
+    // dealt to the source as healing. `drainedAmount` is that actual HP loss.
+    actualDrained = Math.max(0, drainedAmount);
+  } else {
+    // A different pool (MP/SP) was untouched by the damage — drain it now.
+    const available = target[tKey] ?? 0;
+    actualDrained = Math.min(drainedAmount, available);
+    if (actualDrained <= 0) return;
+    target[tKey] = Math.max(0, available - actualDrained);
   }
   if (actualDrained <= 0) return;
-
-  target[tKey] = Math.max(targetResource === 'HP' ? 1 : 0, available - actualDrained);
 
   let replenish = actualDrained;
   if (effect.replenishAmount === 'Half') replenish = Math.floor(actualDrained / 2);
   if (replenish <= 0) return;
 
   const sKey = `current${selfResource}` as ResourceKey;
-  const sMax = source[`max${selfResource}` as 'maxHP' | 'maxMP' | 'maxSP'] || 100;
+  // Clamp to the source's TRUE max. A genuine max of 0 must cap at 0 — don't fall
+  // back to 100, which would let a fully-debuffed pool bank resource above its max.
+  const sMaxRaw = source[`max${selfResource}` as 'maxHP' | 'maxMP' | 'maxSP'];
+  const sMax = typeof sMaxRaw === 'number' && Number.isFinite(sMaxRaw) ? sMaxRaw : 100;
   source[sKey] = Math.min(sMax, (source[sKey] ?? 0) + replenish);
 
   pushLog(log, round, `${source.name} drains ${actualDrained} ${targetResource} from ${target.name} and gains ${replenish} ${selfResource}.`, 'arcane');

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useCombatStore } from './combatStore';
 import { useSessionStore } from './sessionStore';
-import type { Combatant, PartyMember, Character } from '@/types';
+import { useUIStore } from './uiStore';
+import type { Combatant, PartyMember, Character, ResolvedAction } from '@/types';
 
 function mkCombatant(over: Partial<Combatant>): Combatant {
   return {
@@ -256,5 +257,52 @@ describe('combatStore — duplicate-character ownership survives settle', () => 
     await useCombatStore.getState().resolveRound();
     const peers = combat().combatants.filter((c) => c.team === 'player').map((c) => c.peerId).sort();
     expect(peers).toEqual(['P1', 'P2']); // not collapsed onto one peer
+  });
+});
+
+describe('combatStore — rebind binds at most one shared-character unit', () => {
+  it('a single returning peer claims only ONE of two shared-character combatants', () => {
+    const a = mkCombatant({ id: 'hero', team: 'player', peerId: 'pA', characterId: 'hero' });
+    const b = mkCombatant({ id: 'hero', team: 'player', peerId: 'pB', characterId: 'hero' });
+    useCombatStore.getState().startCombat([a, b]); // ids de-dup to hero, hero#2
+
+    // Both players dropped; pA reconnects as pA2 (neither old peer in the connected set).
+    useCombatStore.getState().rebindCombatantPeer('hero', 'pA2', new Set(['pA2']));
+    expect(combat().combatants.filter((c) => c.peerId === 'pA2')).toHaveLength(1); // not both
+
+    // The second player returns as pB2 → claims the remaining orphan, not zero.
+    useCombatStore.getState().rebindCombatantPeer('hero', 'pB2', new Set(['pA2', 'pB2']));
+    const peers = combat().combatants.map((c) => c.peerId).sort();
+    expect(peers).toEqual(['pA2', 'pB2']); // each player controls exactly one unit, no lockout
+  });
+});
+
+describe('combatStore — reconnect DURING resolution survives the playback loop', () => {
+  it('a peer rebind mid-animation is preserved through settle (not reverted to the dead peer)', async () => {
+    useUIStore.setState({ reduceMotion: true }); // 180ms per animated step
+    const hero = mkCombatant({ id: 'hero', team: 'player', peerId: 'oldP', characterId: 'hero' });
+    const ally = mkCombatant({ id: 'ally', team: 'player', peerId: 'P2', characterId: 'ally' });
+    const npc = mkCombatant({ id: 'n1', team: 'npc', peerId: null });
+    useSessionStore.setState({ role: 'gm', party: [member('oldP'), member('P2')] });
+    useCombatStore.getState().startCombat([hero, ally, npc]);
+    useCombatStore.getState().beginRound();
+
+    // Three declared Guards => a multi-step animation, so a rebind in an early frame
+    // is exposed to being clobbered by a later frame (the bug) unless preserved.
+    const guard = (sourceId: string): ResolvedAction =>
+      ({ actionIndex: 0, actionType: 'Guard', sourceId, initiative: 0 } as ResolvedAction);
+    useCombatStore.getState().declareAction('hero', guard('hero'));
+    useCombatStore.getState().declareAction('ally', guard('ally'));
+    useCombatStore.getState().declareAction('n1', guard('n1'));
+
+    const done = useCombatStore.getState().resolveRound(); // do NOT await — resolve animates
+    await new Promise((r) => setTimeout(r, 90)); // land inside the first frame
+    // Player reconnects under a fresh peer id (old peer gone); ally stays connected.
+    useCombatStore.getState().rebindCombatantPeer('hero', 'newP', new Set(['newP', 'P2']));
+    await done;
+
+    expect(find('hero').peerId).toBe('newP'); // preserved, not reverted to 'oldP'
+    expect(find('ally').peerId).toBe('P2'); // untouched
+    useUIStore.setState({ reduceMotion: false });
   });
 });

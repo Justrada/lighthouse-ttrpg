@@ -134,6 +134,19 @@ function uniquifyCombatantIds(combatants: Combatant[]): Combatant[] {
   });
 }
 
+/** Carry live peerId ownership onto an incoming combatant set, keyed by the
+ *  unique combatant id. peerId is ownership metadata the engine never changes, so
+ *  a snapshot rebuilt from a pre-rebind state (each resolve frame, or the end-of-
+ *  round settle) must not clobber a peerId that a mid-resolution reconnect just
+ *  updated. Keyed by id (NOT the possibly-shared characterId) so two players using
+ *  the same character keep distinct ownership. */
+function mergeLivePeerIds(incoming: Combatant[], live: Combatant[]): Combatant[] {
+  const livePeerById = new Map(live.map((c) => [c.id, c.peerId]));
+  return incoming.map((c) =>
+    livePeerById.has(c.id) ? { ...c, peerId: livePeerById.get(c.id) ?? c.peerId } : c,
+  );
+}
+
 /** How many action slots a combatant gets this round (derived; defaults to 3). */
 function slotCountFor(combatantId: string, combatants: Combatant[]): number {
   const c = combatants.find((x) => x.id === combatantId);
@@ -298,7 +311,15 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
       if (!get().combat.isActive) return;
       const stamped = step.log.map((l) => ({ ...l, ts: Date.now() }));
       set((s) => ({
-        combat: { ...step.snapshot, phase: 'resolving', log: [...s.combat.log, ...stamped] },
+        combat: {
+          ...step.snapshot,
+          // step.snapshot was cloned from the pre-animation state, so it carries
+          // stale peerIds. Merge live ownership forward onto every frame so a player
+          // who reconnects mid-resolution isn't reverted to their dead peer id.
+          combatants: mergeLivePeerIds(step.snapshot.combatants, s.combat.combatants),
+          phase: 'resolving',
+          log: [...s.combat.log, ...stamped],
+        },
       }));
       broadcast(get().combat);
       await delay(reduceMotion ? 180 : 1050);
@@ -310,15 +331,9 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     const accumulatedLog = get().combat.log;
     const settled = processEndOfRound({ ...afterActions, log: accumulatedLog });
     // Preserve peerId rebinds that happened during the animation (e.g. a player
-    // reconnecting mid-resolution) — `settled` came from the pre-animation snapshot.
-    // Key by the unique combatant id (NOT the possibly-shared characterId) so two
-    // players using the same character keep distinct ownership. Ids are stable
-    // through processEndOfRound and a mid-resolution reconnect rebinds the live
-    // combatant in place, so this still preserves reconnects.
-    const livePeerById = new Map(get().combat.combatants.map((c) => [c.id, c.peerId]));
-    const reboundCombatants = settled.combatants.map((c) =>
-      livePeerById.has(c.id) ? { ...c, peerId: livePeerById.get(c.id) ?? c.peerId } : c,
-    );
+    // reconnecting mid-resolution) — `settled` came from the pre-animation snapshot,
+    // while the live combatants carry any rebind the playback loop merged forward.
+    const reboundCombatants = mergeLivePeerIds(settled.combatants, get().combat.combatants);
     const nextRoundLog = [...settled.log, logEntry(settled.round, `— Round ${settled.round} —`, 'arcane')];
     set({
       combat: {
@@ -476,6 +491,10 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
       combat: {
         ...s.combat,
         combatants: s.combat.combatants.map((c) => {
+          // Bind AT MOST ONE combatant per reconnect: when two players share a
+          // characterId and both are orphaned, a single returning peer must not
+          // grab both units — that would lock the other player out of their own.
+          if (changed) return c;
           // Only rebind an ORPHANED combatant (its prior owner is gone) so a peer
           // can't hijack a still-connected player's unit by claiming their id.
           const orphaned = c.peerId == null || !connectedPeerIds || !connectedPeerIds.has(c.peerId);
