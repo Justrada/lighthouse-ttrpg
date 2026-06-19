@@ -116,3 +116,70 @@ describe('combatStore — applyRest scoping', () => {
     expect(find('b').currentMP).toBe(0);
   });
 });
+
+describe('combatStore — revive resets death saves (GM heal)', () => {
+  it('clears death-save progress when healing a downed combatant above 0', () => {
+    const downed = mkCombatant({
+      id: 'c1',
+      currentHP: 0,
+      isUnconscious: true,
+      deathSaves: { successes: 1, failures: 2 },
+    });
+    useCombatStore.getState().startCombat([downed]);
+    useCombatStore.getState().adjustResource('c1', 'HP', 10);
+    expect(find('c1').currentHP).toBe(10);
+    expect(find('c1').isUnconscious).toBe(false);
+    expect(find('c1').deathSaves).toEqual({ successes: 0, failures: 0 });
+  });
+});
+
+describe('combatStore — setCombatantTeam guard', () => {
+  it('does not flip allegiance mid-resolution', () => {
+    const npc = mkCombatant({ id: 'n1', team: 'npc' });
+    useCombatStore.getState().startCombat([npc]);
+    useCombatStore.setState((s) => ({ combat: { ...s.combat, phase: 'resolving' } }));
+    useCombatStore.getState().setCombatantTeam('n1', 'player');
+    expect(find('n1').team).toBe('npc');
+  });
+});
+
+describe('combatStore — locked orders are immutable', () => {
+  it('rejects declare/clear once a combatant is locked', () => {
+    const c = mkCombatant({ id: 'c1', team: 'npc' });
+    useCombatStore.getState().startCombat([c]);
+    useCombatStore.getState().beginRound();
+    useCombatStore.getState().declareAction('c1', { actionIndex: 0, actionType: 'Pass' });
+    useCombatStore.getState().lockActions('c1', true);
+    // edits while locked are ignored
+    useCombatStore.getState().declareAction('c1', { actionIndex: 1, actionType: 'Guard' });
+    useCombatStore.getState().clearAction('c1', 0);
+    expect(combat().declaredActions['c1']).toHaveLength(1);
+    expect(combat().declaredActions['c1'][0].actionType).toBe('Pass');
+  });
+});
+
+describe('combatStore — action-slot cap (anti-cheat)', () => {
+  it('clamps a remote declare to the combatant action-slot budget', () => {
+    const c = mkCombatant({ id: 'c1', team: 'player', peerId: 'peerA' });
+    useSessionStore.setState({ role: 'gm', party: [member('peerA')] });
+    useCombatStore.getState().startCombat([c]);
+    useCombatStore.getState().beginRound();
+    const tooMany = Array.from({ length: 6 }, (_, i) => ({
+      actionIndex: i,
+      actionType: 'Pass' as const,
+    }));
+    useCombatStore.getState().applyRemoteDeclare('c1', tooMany);
+    // default slot count is 3 -> only indices 0..2 survive
+    expect(combat().declaredActions['c1']).toHaveLength(3);
+    expect(combat().declaredActions['c1'].every((a) => a.actionIndex < 3)).toBe(true);
+  });
+});
+
+describe('combatStore — rebindCombatantPeer (reconnect)', () => {
+  it('rebinds a combatant to a new peer id by stable character id', () => {
+    const c = mkCombatant({ id: 'c1', team: 'player', peerId: 'old-peer', characterId: 'char-1' });
+    useCombatStore.getState().startCombat([c]);
+    useCombatStore.getState().rebindCombatantPeer('char-1', 'new-peer');
+    expect(find('c1').peerId).toBe('new-peer');
+  });
+});

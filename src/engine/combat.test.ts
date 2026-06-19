@@ -819,3 +819,87 @@ describe('Action-unit durations are not double-decremented (fix 5)', () => {
     expect(cAfter.statusEffects.some((e) => e.type === 'SomeBuff')).toBe(false);
   });
 });
+
+describe('damage-over-time independence (per-effect roll cache)', () => {
+  it('rolls a DoT separately from the immediate hit instead of inheriting it', () => {
+    const caster = createCombatant(makeCharacter({ id: 'caster', coreStats: { mind: 8, body: 6, soul: 4 } }), { team: 'player', position: hex(0, 0) });
+    caster.currentMP = 99; // Fire Blast costs 7 MP
+    const foe = createCombatant(makeCharacter({ id: 'foe', name: 'Foe', coreStats: { mind: 4, body: 4, soul: 4 } }), { team: 'npc', position: hex(2, 0) });
+    const state = makeState(caster, foe);
+    // node-47 Fire Blast: 2d6 immediate + 1d4 DoT (Survival save to negate).
+    // Sequence: attack 20 (crit hit), save 1 (DoT lands), then mid damage dice.
+    const { state: after } = resolveAction(
+      state,
+      action({ actionType: 'Use Ability', sourceId: 'caster', sourceTeam: 'player', targetId: 'foe', actionId: 'node-47' }),
+      seqRng([0.95, 0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+    );
+    const foeAfter = after.combatants.find((c) => c.id === 'foe')!;
+    const dot = foeAfter.statusEffects.find(
+      (e) => typeof (e as { rolledDamage?: number }).rolledDamage === 'number',
+    ) as { rolledDamage: number } | undefined;
+    expect(dot).toBeTruthy();
+    // The DoT rolls its own 1d4 (max 4, ×2 crit = 8). The bug reused the 2d6
+    // immediate roll (16 here), which would exceed this bound.
+    expect(dot!.rolledDamage).toBeGreaterThan(0);
+    expect(dot!.rolledDamage).toBeLessThanOrEqual(8);
+  });
+});
+
+describe('AOE classification — damage overrides buff riders', () => {
+  it('treats a damaging AOE that also grants a buff as offensive (hits foes, not allies)', () => {
+    const caster = createCombatant(makeCharacter({ id: 'caster' }), { team: 'player', position: hex(0, 0) });
+    const e1 = createCombatant(makeCharacter({ id: 'e1' }), { team: 'npc', position: hex(4, 0) }); // primary
+    const e2 = createCombatant(makeCharacter({ id: 'e2' }), { team: 'npc', position: hex(3, 0) }); // dist 1
+    const ally = createCombatant(makeCharacter({ id: 'ally' }), { team: 'player', position: hex(5, 0) }); // dist 1
+    const state: CombatState = { ...makeState(caster, e1), combatants: [caster, e1, e2, ally] };
+    // Apply Damage + a "+" Modify Stat rider previously misflagged this as supportive.
+    const usable = {
+      name: 'Searing Ward',
+      range: 'Far',
+      aoe: 'AOE 3',
+      hitType: 'Roll to Hit',
+      effects: [
+        { type: 'Apply Damage', additionalDamage: '2d6' },
+        { type: 'Modify Stat', statToModify: 'AC', modification: '+2' },
+      ],
+    } as never;
+    const ids = getAOETargets(state, e1, 'AOE 3', caster, usable).map((t) => t.id).sort();
+    expect(ids).toEqual(['e1', 'e2']);
+    expect(ids).not.toContain('ally');
+  });
+});
+
+describe('consumable charges', () => {
+  it('tallies backpack consumables and spends a charge per use', () => {
+    const heroChar = makeCharacter({
+      id: 'hero',
+      currentHP: 10,
+      inventory: { armor: null, weapon: null, shield: null, accessories: [], backpack: [POTION] },
+    });
+    const hero = createCombatant(heroChar, { team: 'player', position: hex(0, 0) });
+    expect(hero.consumables?.[POTION]).toBe(1);
+    const foe = createCombatant(makeCharacter({ id: 'foe', name: 'Foe' }), { team: 'npc', position: hex(1, 0) });
+    const state = makeState(hero, foe);
+
+    // First use heals and spends the only charge.
+    const r1 = resolveAction(
+      state,
+      action({ actionType: 'Use Item', sourceId: 'hero', targetId: 'hero', actionId: POTION }),
+      maxRng,
+    );
+    const after1 = r1.state.combatants.find((c) => c.id === 'hero')!;
+    expect(after1.currentHP).toBeGreaterThan(10);
+    expect(after1.consumables?.[POTION]).toBe(0);
+
+    // Second use is refused — no charges left, no further healing.
+    const hpAfter1 = after1.currentHP;
+    const r2 = resolveAction(
+      r1.state,
+      action({ actionType: 'Use Item', sourceId: 'hero', targetId: 'hero', actionId: POTION }),
+      maxRng,
+    );
+    const after2 = r2.state.combatants.find((c) => c.id === 'hero')!;
+    expect(after2.currentHP).toBe(hpAfter1);
+    expect(r2.results.some((x) => /no .*remaining/i.test(x.text))).toBe(true);
+  });
+});

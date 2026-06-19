@@ -11,6 +11,7 @@ import {
 import { useCombatStore } from './combatStore';
 import { useUIStore } from './uiStore';
 import { normalizeCharacter } from '@/lib/character';
+import { normalizeCombatState } from '@/lib/combat';
 
 export interface PendingCheck {
   id: string;
@@ -80,7 +81,14 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
           // Sync party to everyone and bring the newcomer up to date.
           broadcastParty();
           if (combat.combat.isActive) {
-            transport.send(from, { type: 'combat_update', payload: { combat: combat.combat } });
+            // A reconnecting player is assigned a fresh peer id; rebind their
+            // existing combatant (matched by the stable character id) to it so
+            // they regain control instead of being locked out under the old id.
+            combat.rebindCombatantPeer(character.id, from);
+            transport.send(from, {
+              type: 'combat_update',
+              payload: { combat: useCombatStore.getState().combat },
+            });
           }
           break;
         }
@@ -143,7 +151,7 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         break;
       case 'combat_start':
       case 'combat_update':
-        combat.ingest(msg.payload.combat);
+        combat.ingest(normalizeCombatState(msg.payload?.combat));
         break;
       case 'combat_end':
         combat.reset();

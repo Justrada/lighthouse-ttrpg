@@ -8,7 +8,7 @@ import type {
   DeclaredAction,
 } from '@/types';
 import type { CombatStore } from './contracts';
-import { resolveRound, processEndOfRound, deployHexes } from '@/engine';
+import { resolveRound, processEndOfRound, deployHexes, calculateDerivedStats } from '@/engine';
 import { CONDITIONS, BATTLE_GRID } from '@/data/constants';
 import { useSessionStore } from './sessionStore';
 import { useRosterStore } from './rosterStore';
@@ -19,6 +19,7 @@ import { findNpcTemplate } from '@/data/npcTemplates';
 export interface CombatStoreImpl extends CombatStore {
   applyRemoteDeclare: (combatantId: string, actions: DeclaredAction[]) => void;
   applyRemoteLock: (combatantId: string, locked: boolean) => void;
+  rebindCombatantPeer: (characterId: string, peerId: string) => void;
   appendLog: (entry: CombatLogEntry) => void;
   forceResolve: () => void;
   reset: () => void;
@@ -99,6 +100,14 @@ function buildCharLookup(): (c: Combatant) => Character | undefined {
   };
 }
 
+/** How many action slots a combatant gets this round (derived; defaults to 3). */
+function slotCountFor(combatantId: string, combatants: Combatant[]): number {
+  const c = combatants.find((x) => x.id === combatantId);
+  if (!c) return 3;
+  const ch = buildCharLookup()(c);
+  return ch ? calculateDerivedStats(ch).actionsPerRound : 3;
+}
+
 export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   combat: emptyCombat(),
 
@@ -144,7 +153,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
 
   /** GM reassigns a combatant's team (e.g. recruit a beast as a party ally). */
   setCombatantTeam: (combatantId, team) => {
-    if (!isGM()) return;
+    if (!isGM() || get().combat.phase === 'resolving') return;
     set((s) => ({
       combat: {
         ...s.combat,
@@ -171,6 +180,8 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
 
   declareAction: (combatantId, action) => {
     if (get().combat.phase !== 'declare') return;
+    if (get().combat.lockedActions[combatantId]) return; // locked orders are immutable
+    if (action.actionIndex < 0 || action.actionIndex >= slotCountFor(combatantId, get().combat.combatants)) return;
     set((s) => {
       const existing = s.combat.declaredActions[combatantId] ?? [];
       const next = existing.filter((a) => a.actionIndex !== action.actionIndex);
@@ -187,6 +198,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
 
   clearAction: (combatantId, actionIndex) => {
     if (get().combat.phase !== 'declare') return;
+    if (get().combat.lockedActions[combatantId]) return; // can't edit locked orders
     set((s) => {
       const existing = s.combat.declaredActions[combatantId] ?? [];
       return {
@@ -287,7 +299,14 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
           const maxKey = resource === 'HP' ? 'maxHP' : resource === 'MP' ? 'maxMP' : 'maxSP';
           const next = Math.max(0, Math.min(c[maxKey], c[key] + d));
           const updated: Combatant = { ...c, [key]: next } as Combatant;
-          if (resource === 'HP') updated.isUnconscious = next <= 0 && !updated.isDead;
+          if (resource === 'HP') {
+            const wasDown = c.currentHP <= 0;
+            updated.isUnconscious = next <= 0 && !updated.isDead;
+            // Reviving from 0 clears death-save progress, matching the engine's
+            // own revive path so a healed hero doesn't carry stale failures into
+            // the next time they fall.
+            if (next > 0 && wasDown) updated.deathSaves = { successes: 0, failures: 0 };
+          }
           return updated;
         }),
       },
@@ -368,8 +387,17 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   // --- network-router entry points (GM side) ---
   applyRemoteDeclare: (combatantId, actions) => {
     if (get().combat.phase !== 'declare') return;
+    if (get().combat.lockedActions[combatantId]) return;
+    // Trust nothing from the wire: clamp to the combatant's real action-slot
+    // budget, at most one action per slot (last write wins for a given index).
+    const slots = slotCountFor(combatantId, get().combat.combatants);
+    const byIndex = new Map<number, DeclaredAction>();
+    for (const a of Array.isArray(actions) ? actions : []) {
+      if (a && a.actionIndex >= 0 && a.actionIndex < slots) byIndex.set(a.actionIndex, a);
+    }
+    const clamped = [...byIndex.values()].sort((a, b) => a.actionIndex - b.actionIndex);
     set((s) => ({
-      combat: { ...s.combat, declaredActions: { ...s.combat.declaredActions, [combatantId]: actions } },
+      combat: { ...s.combat, declaredActions: { ...s.combat.declaredActions, [combatantId]: clamped } },
     }));
     broadcast(get().combat);
   },
@@ -380,6 +408,25 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
       combat: { ...s.combat, lockedActions: { ...s.combat.lockedActions, [combatantId]: locked } },
     }));
     broadcast(get().combat);
+  },
+
+  /** Rebind a combatant to a (possibly new) peer id, matched by stable character
+   *  id — used when a player reconnects under a fresh PeerJS id mid-combat. */
+  rebindCombatantPeer: (characterId, peerId) => {
+    let changed = false;
+    set((s) => ({
+      combat: {
+        ...s.combat,
+        combatants: s.combat.combatants.map((c) => {
+          if (c.characterId === characterId && c.peerId !== peerId) {
+            changed = true;
+            return { ...c, peerId };
+          }
+          return c;
+        }),
+      },
+    }));
+    if (changed) broadcast(get().combat);
   },
 
   appendLog: (entry) => set((s) => ({ combat: { ...s.combat, log: [...s.combat.log, entry].slice(-200) } })),

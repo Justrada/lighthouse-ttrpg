@@ -78,7 +78,16 @@ export default function ForgeScreen() {
   }, [id]);
 
   const handleSave = () => {
-    const saved = useDraftStore.getState().commit();
+    const { budget, commit } = useDraftStore.getState();
+    if (budget.available < 0) {
+      pushToast({
+        title: 'Too many points spent',
+        body: `Overspent by ${Math.abs(budget.available)}. Lower a stat or unlearn a skill before saving.`,
+        tone: 'danger',
+      });
+      return;
+    }
+    const saved = commit();
     if (saved) {
       pushToast({
         title: 'Hero forged',

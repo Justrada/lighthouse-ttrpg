@@ -248,11 +248,24 @@ export function HexBoard({
         // Enemy: offensive, target-seeking options.
         return Boolean(opt.needsTarget && !opt.supportive);
       })
-      .map((opt) => ({
-        option: opt,
-        inRange:
-          isSelf || !opt.needsTarget ? true : isTargetInRange(actor, target, opt.range),
-      }));
+      .map((opt) => {
+        // Consumables carry a per-combat charge tally; show the remaining count
+        // and disable the option when the actor has none left.
+        const remaining =
+          opt.actionType === 'Use Item' && opt.actionId
+            ? actor.consumables?.[opt.actionId]
+            : undefined;
+        const outOfStock = remaining !== undefined && remaining <= 0;
+        const inRange =
+          !outOfStock &&
+          (isSelf || !opt.needsTarget ? true : isTargetInRange(actor, target, opt.range));
+        return {
+          option: opt,
+          inRange,
+          badge: remaining !== undefined ? `×${remaining}` : undefined,
+          note: outOfStock ? 'none left' : undefined,
+        };
+      });
   };
 
   const openMenuFor = (c: Combatant, el: HTMLElement | null) => {

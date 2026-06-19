@@ -20,6 +20,9 @@ export interface Combatant {
   position: HexCoord;
   /** Weapon swapped to mid-combat; overrides the source character's equipped weapon. */
   equippedWeaponId?: string | null;
+  /** Remaining uses of each consumable item id this combat (tallied from the
+   *  backpack at creation) so a single potion can't be used indefinitely. */
+  consumables?: Record<string, number>;
   initiativeBonus: number;
   maxHP: number;
   maxMP: number;

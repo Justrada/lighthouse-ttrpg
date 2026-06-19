@@ -18,8 +18,12 @@ import type { ActionOption } from '../shared/actionOptions';
 /** An option as offered in the menu, annotated with reach state. */
 export interface ActionMenuItem {
   option: ActionOption;
-  /** False → shown greyed with an "out of range" hint. */
+  /** False → shown greyed with a hint ({@link note} or "out of range"). */
   inRange: boolean;
+  /** Small badge after the label, e.g. a consumable count "×2". */
+  badge?: string;
+  /** Disabled hint shown in place of "out of range" (e.g. "none left"). */
+  note?: string;
 }
 
 export interface ActionMenuProps {
@@ -156,7 +160,7 @@ export function ActionMenu({
             <p className="px-3 py-4 text-center text-xs text-ink-faint">No actions available.</p>
           ) : (
             <ul className="max-h-[16rem] overflow-y-auto py-1">
-              {items.map(({ option, inRange }) => (
+              {items.map(({ option, inRange, badge, note }) => (
                 <li key={option.key}>
                   <button
                     type="button"
@@ -187,6 +191,11 @@ export function ActionMenu({
                             {option.cost}
                           </span>
                         )}
+                        {badge && (
+                          <span className="shrink-0 font-mono text-[0.625rem] text-ink-faint">
+                            {badge}
+                          </span>
+                        )}
                       </span>
                       <span className="flex items-center gap-1.5 text-[0.625rem]">
                         {option.range && (
@@ -195,7 +204,7 @@ export function ActionMenu({
                             {option.aoe && option.aoe !== 'Single Target' ? ` · ${option.aoe}` : ''}
                           </span>
                         )}
-                        {!inRange && <span className="text-hp">out of range</span>}
+                        {!inRange && <span className="text-hp">{note ?? 'out of range'}</span>}
                       </span>
                     </span>
                   </button>

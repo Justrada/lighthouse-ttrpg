@@ -1065,8 +1065,10 @@ const catalog: ExtraItems = {
         {
           id: fx('antitoxin_save'),
           type: 'Give Advantage/Disadvantage',
-          advantageType: 'Advantage',
-          appliesTo: 'Saving Throw',
+          // The engine reads `advDis`/`targetSkill` (see effects.ts); the older
+          // `advantageType`/`appliesTo` names were silently ignored.
+          advDis: 'Advantage',
+          targetSkill: 'Saving Throw',
           durationType: 'Rounds',
           durationValue: 3,
         },

@@ -98,6 +98,7 @@ function cloneCombatant(c: Combatant): Combatant {
     ...c,
     statusEffects: (c.statusEffects ?? []).map((e) => ({ ...e })),
     deathSaves: { ...c.deathSaves },
+    consumables: c.consumables ? { ...c.consumables } : c.consumables,
     lastActionResult: c.lastActionResult ? { ...c.lastActionResult } : c.lastActionResult,
   };
 }
@@ -161,6 +162,14 @@ export function createCombatant(
   const currentMP = opts.currentMP ?? character.currentMP ?? derived.mp;
   const currentSP = opts.currentSP ?? character.currentSP ?? derived.sp;
 
+  // Tally consumable charges from the backpack so each one has finite uses.
+  const consumables: Record<string, number> = {};
+  for (const itemId of character.inventory?.backpack ?? []) {
+    const item = findItem(itemId);
+    if (item?.itemType !== 'Consumable') continue;
+    consumables[itemId] = (consumables[itemId] ?? 0) + (item.charges ?? 1);
+  }
+
   return {
     id: character.id,
     peerId: opts.peerId ?? null,
@@ -169,6 +178,7 @@ export function createCombatant(
     team: opts.team,
     position,
     equippedWeaponId: undefined,
+    consumables,
     initiativeBonus: derived.initiative,
     maxHP: derived.hp,
     maxMP: derived.mp,
@@ -351,6 +361,9 @@ export function isTargetInRange(
 /** True when a usable only carries supportive (ally-targeting) effects. */
 function isSupportive(data: UsableData): boolean {
   if (data.range === 'Self') return true;
+  // Anything that deals damage is offensive, even when it also carries a buff —
+  // otherwise a damaging AOE with a "+" stat rider would wrongly target allies.
+  if ((data.effects ?? []).some((e) => e.type === 'Apply Damage')) return false;
   return (data.effects ?? []).some(
     (e) =>
       e.type === 'Modify Stat' &&
@@ -772,7 +785,13 @@ function processDeathSave(
 
 /** Roll-once cache for shared values applied identically across AOE targets. */
 interface RolledCache {
-  damage?: number;
+  /**
+   * Rolled damage keyed by effect id. Caching per effect means a single roll is
+   * shared across all AOE targets of the *same* effect, while distinct effects on
+   * one usable — e.g. an immediate hit and its separate damage-over-time tick —
+   * each roll their own value instead of the DoT inheriting the hit's number.
+   */
+  damage: Record<string, number>;
   stats: Record<string, number>;
 }
 
@@ -829,10 +848,11 @@ function applyEffect(
 
   switch (effect.type) {
     case 'Apply Damage': {
-      if (cache.damage === undefined) {
-        cache.damage = computeDamage(effect, source, sourceChar, isCrit, rng);
+      const dkey = effect.id || 'damage';
+      if (cache.damage[dkey] === undefined) {
+        cache.damage[dkey] = computeDamage(effect, source, sourceChar, isCrit, rng);
       }
-      let damage = cache.damage;
+      let damage = cache.damage[dkey];
       if (effect.isHalved) damage = Math.floor(damage / 2);
 
       // Damage-over-time: attach as a duration effect rather than apply now.
@@ -1284,7 +1304,7 @@ function resolveUsable(
 
   const allTargets = getAOETargets(state, target!, data.aoe, source, data);
   const autoHit = data.hitType === 'Auto Hit' || data.range === 'Self';
-  const cache: RolledCache = { stats: {} };
+  const cache: RolledCache = { stats: {}, damage: {} };
 
   if (autoHit) {
     pushLog(log, round, `${source.name} uses ${name}${allTargets.length > 1 ? ` affecting ${allTargets.length} targets` : ` on ${target!.name}`}.`, 'arcane');
@@ -1464,11 +1484,21 @@ export function resolveAction(
         pushLog(log, round, `${source.name} tries to use ${item.name}, but has no target.`, 'muted');
         break;
       }
+      // Enforce the per-combat consumable tally — a single item is not infinite.
+      const remaining = source.consumables?.[item.id];
+      if (remaining !== undefined && remaining <= 0) {
+        pushLog(log, round, `${source.name} reaches for ${item.name}, but has none left.`, 'muted');
+        results.push({ kind: 'info', text: `No ${item.name} remaining`, targetId: source.id });
+        break;
+      }
       pushLog(log, round, `${source.name} uses ${item.name} on ${target.name}.`, 'arcane');
-      const cache: RolledCache = { stats: {} };
+      const cache: RolledCache = { stats: {}, damage: {} };
       const ctx: ApplyContext = { ...ctxBase, data: item };
       const effs = processSavingThrows(target, item.effects ?? [], round, log, rng, options.charLookup?.(target));
       for (const eff of effs) applyEffect(ctx, target, eff, cache);
+      if (source.consumables && remaining !== undefined) {
+        source.consumables[item.id] = remaining - 1;
+      }
       break;
     }
 

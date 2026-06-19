@@ -51,4 +51,34 @@ describe('normalizeCharacter', () => {
     expect(c.coreStats.mind).toBe(4);
     expect(c.coreStats.body).toBe(5);
   });
+
+  it('clamps out-of-range core stats into [1, 12]', () => {
+    const c = normalizeCharacter({ coreStats: { mind: -50, body: 9999, soul: 0 } } as unknown as Character);
+    expect(c.coreStats).toEqual({ mind: 1, body: 12, soul: 1 });
+  });
+
+  it('clamps level into [1, 20]', () => {
+    expect(normalizeCharacter({ level: 99999 } as Partial<Character>).level).toBe(20);
+    expect(normalizeCharacter({ level: -5 } as Partial<Character>).level).toBe(1);
+  });
+
+  it('drops unknown and duplicate learned skills, keeping center-0', () => {
+    const c = normalizeCharacter({
+      learnedSkills: ['center-0', 'center-0', 'node-1', 'node-1', 'totally-fake-node'],
+    } as Partial<Character>);
+    expect(c.learnedSkills).toEqual(['center-0', 'node-1']);
+  });
+
+  it('trims whitespace and truncates an overlong name', () => {
+    const c = normalizeCharacter({ name: '   ' + 'a'.repeat(100) } as Partial<Character>);
+    expect(c.name).toHaveLength(40);
+    expect(normalizeCharacter({ name: '   ' } as Partial<Character>).name).toBe('Unnamed Hero');
+  });
+
+  it('clamps negative current resources to zero', () => {
+    const c = normalizeCharacter({ currentHP: -999, currentMP: -1, currentSP: -3 } as unknown as Character);
+    expect(c.currentHP).toBe(0);
+    expect(c.currentMP).toBe(0);
+    expect(c.currentSP).toBe(0);
+  });
 });

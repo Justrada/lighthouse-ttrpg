@@ -189,6 +189,10 @@ export const useDraftStore = create<DraftStore>()((set, get) => {
     commit: () => {
       const d = get().draft;
       if (!d) return null;
+      // Never persist an over-budget hero (e.g. after lowering the level below
+      // what the current stats + skills already cost). The UI shows a clearer
+      // message before this point; this is the safety net for every caller.
+      if (calculateSkillBudget(d).available < 0) return null;
       const finalized: Character = { ...d, name: d.name.trim() || 'Unnamed Hero', updatedAt: Date.now() };
       useRosterStore.getState().upsert(finalized);
       return finalized;
