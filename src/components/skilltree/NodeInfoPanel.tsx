@@ -4,6 +4,7 @@ import type { SkillNode, SkillChoice } from '@/types';
 import { Badge, Button, Divider, Select, StatBadge } from '@/components/ui';
 import { getSkillCost } from '@/engine';
 import { cn } from '@/lib/cn';
+import { useReskin } from '@/lib/reskin';
 import {
   CORE_SKILL_CHOICES,
   RESOURCE_CHOICES,
@@ -46,6 +47,7 @@ export function NodeInfoPanel({
   onChoice,
   className,
 }: NodeInfoPanelProps) {
+  const reskin = useReskin();
   if (!node) {
     return (
       <div
@@ -107,7 +109,7 @@ export function NodeInfoPanel({
           </span>
           <div className="min-w-0 flex-1">
             <h4 className="font-display text-lg leading-tight text-ink">
-              {node.label}
+              {reskin.nodeName(node.id, node.label)}
             </h4>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {item && (
@@ -136,7 +138,7 @@ export function NodeInfoPanel({
 
         {(item?.description || node.description) && (
           <p className="text-sm leading-relaxed text-ink-muted">
-            {item?.description || node.description}
+            {reskin.nodeDescription(node.id, item?.description || node.description || '')}
           </p>
         )}
       </div>

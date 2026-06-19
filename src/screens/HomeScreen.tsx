@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Hammer, Radio, DoorOpen, Users, ArrowRight } from 'lucide-react';
+import { Hammer, Radio, DoorOpen, Users, ArrowRight, Wand2, Store } from 'lucide-react';
 import { PageShell } from '@/components/ui';
 import { Wordmark, LighthouseMark } from '@/components/brand';
 import { GlowOrb, Starfield, FogLayer } from '@/components/atmosphere';
@@ -105,6 +105,27 @@ export default function HomeScreen() {
             description="Answer the beam with a room code and bring your hero."
             accent="mystic"
             onClick={() => navigate('/join')}
+          />
+        </motion.div>
+
+        {/* Create & share — Worldforge + Marketplace */}
+        <motion.div
+          variants={item}
+          className="mt-4 grid w-full grid-cols-1 gap-4 sm:grid-cols-2"
+        >
+          <PortalCard
+            icon={Wand2}
+            title="Worldforge"
+            description="Build your own system — reskin every stat, skill, and item."
+            accent="arcane"
+            onClick={() => navigate('/worldforge')}
+          />
+          <PortalCard
+            icon={Store}
+            title="Marketplace"
+            description="Discover and share community-made systems."
+            accent="mystic"
+            onClick={() => navigate('/marketplace')}
           />
         </motion.div>
 

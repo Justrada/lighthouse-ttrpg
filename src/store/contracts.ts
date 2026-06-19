@@ -20,6 +20,7 @@ import type {
   GameMessage,
   DiceRollResult,
   AdvantageMode,
+  Worldpack,
 } from '@/types';
 import type { Archetype } from '@/engine';
 
@@ -32,6 +33,22 @@ export interface RosterStore {
   upsert: (character: Character) => void;
   remove: (id: string) => void;
   duplicate: (id: string) => void;
+}
+
+export interface WorldpackStore {
+  worldpacks: Worldpack[];
+  /** Id of the pack currently re-skinning the game (null = base system). */
+  activeId: string | null;
+  load: () => void;
+  get: (id: string) => Worldpack | undefined;
+  getActive: () => Worldpack | null;
+  /** Create or update a pack (by id). */
+  save: (pack: Worldpack) => void;
+  remove: (id: string) => void;
+  duplicate: (id: string) => Worldpack | null;
+  setActive: (id: string | null) => void;
+  /** Validate + add an imported pack (JSON string or object). Returns it, or null. */
+  importPack: (raw: unknown) => Worldpack | null;
 }
 
 export interface DraftStore {

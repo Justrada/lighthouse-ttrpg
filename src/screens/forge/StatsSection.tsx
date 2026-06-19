@@ -6,6 +6,7 @@ import { useDraftStore } from '@/store';
 import { getStatCost } from '@/engine';
 import { CORE_STAT_LABELS, SKILL_LABELS, SKILL_SOURCES } from '@/data/constants';
 import { StatBadge, Divider } from '@/components/ui';
+import { useReskin } from '@/lib/reskin';
 import { cn } from '@/lib/cn';
 
 const STAT_MAX = 12;
@@ -43,6 +44,7 @@ export function StatsSection() {
   const derived = useDraftStore((s) => s.derived);
   const budget = useDraftStore((s) => s.budget);
   const changeStat = useDraftStore((s) => s.changeStat);
+  const reskin = useReskin();
 
   if (!draft || !derived) return null;
 
@@ -56,6 +58,7 @@ export function StatsSection() {
           const atMax = value >= STAT_MAX;
           const atMin = value <= STAT_MIN;
           const meta = STAT_META[stat];
+          const statLabel = reskin.term(CORE_STAT_LABELS[stat], CORE_STAT_LABELS[stat]);
 
           return (
             <div
@@ -79,7 +82,7 @@ export function StatsSection() {
 
                 <div className="min-w-0 flex-1">
                   <h4 className="font-display text-base text-ink">
-                    {CORE_STAT_LABELS[stat]}
+                    {statLabel}
                   </h4>
                   <p className="truncate text-xs text-ink-muted">{meta.blurb}</p>
                 </div>
@@ -88,7 +91,7 @@ export function StatsSection() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    aria-label={`Decrease ${CORE_STAT_LABELS[stat]}`}
+                    aria-label={`Decrease ${statLabel}`}
                     disabled={atMin}
                     onClick={() => changeStat(stat, -1)}
                     className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-void/60 text-ink-muted transition-colors hover:text-beam disabled:cursor-not-allowed disabled:opacity-30 [&_svg]:h-4 [&_svg]:w-4"
@@ -111,7 +114,7 @@ export function StatsSection() {
 
                   <button
                     type="button"
-                    aria-label={`Increase ${CORE_STAT_LABELS[stat]}`}
+                    aria-label={`Increase ${statLabel}`}
                     disabled={atMax || !canAfford}
                     onClick={() => changeStat(stat, +1)}
                     className="grid h-9 w-9 place-items-center rounded-xl border border-line bg-void/60 text-ink-muted transition-colors hover:text-beam disabled:cursor-not-allowed disabled:opacity-30 [&_svg]:h-4 [&_svg]:w-4"
@@ -144,7 +147,7 @@ export function StatsSection() {
                 <span className="text-ink-muted">
                   Feeds:{' '}
                   <span className={toneText[meta.tone]}>
-                    {skillsFedBy(stat).map((k) => SKILL_LABELS[k]).join(', ')}
+                    {skillsFedBy(stat).map((k) => reskin.term(SKILL_LABELS[k], SKILL_LABELS[k])).join(', ')}
                   </span>
                 </span>
               </div>
@@ -157,9 +160,9 @@ export function StatsSection() {
 
       {/* Live derived stats */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-        <StatBadge stacked label="HP" value={derived.hp} tone="beam" />
-        <StatBadge stacked label="MP" value={derived.mp} tone="arcane" />
-        <StatBadge stacked label="SP" value={derived.sp} tone="mystic" />
+        <StatBadge stacked label={reskin.term('HP', 'HP')} value={derived.hp} tone="beam" />
+        <StatBadge stacked label={reskin.term('MP', 'MP')} value={derived.mp} tone="arcane" />
+        <StatBadge stacked label={reskin.term('SP', 'SP')} value={derived.sp} tone="mystic" />
         <StatBadge stacked label="Armor" value={derived.ac} />
         <StatBadge stacked label="Actions" value={derived.actionsPerRound} />
         {SKILL_KEYS.map((k) => (
@@ -167,7 +170,7 @@ export function StatsSection() {
             key={k}
             stacked
             size="sm"
-            label={SKILL_LABELS[k]}
+            label={reskin.term(SKILL_LABELS[k], SKILL_LABELS[k])}
             value={derived[k] >= 0 ? `+${derived[k]}` : `${derived[k]}`}
           />
         ))}

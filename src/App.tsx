@@ -5,6 +5,8 @@ import ForgeScreen from './screens/ForgeScreen';
 import HostScreen from './screens/HostScreen';
 import JoinScreen from './screens/JoinScreen';
 import TableScreen from './screens/TableScreen';
+import WorldforgeScreen from './screens/WorldforgeScreen';
+import MarketplaceScreen from './screens/MarketplaceScreen';
 import { AppOverlays } from './components/system/AppOverlays';
 
 export default function App() {
@@ -18,6 +20,8 @@ export default function App() {
         <Route path="/host" element={<HostScreen />} />
         <Route path="/join" element={<JoinScreen />} />
         <Route path="/table" element={<TableScreen />} />
+        <Route path="/worldforge" element={<WorldforgeScreen />} />
+        <Route path="/marketplace" element={<MarketplaceScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <AppOverlays />

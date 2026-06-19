@@ -6,6 +6,8 @@ export const KEYS = {
   draft: 'draft',
   prefs: 'prefs',
   lastSession: 'lastSession',
+  worldpacks: 'worldpacks',
+  activeWorldpack: 'activeWorldpack',
 } as const;
 
 export function loadJSON<T>(key: string, fallback: T): T {

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { SkillNode } from '@/types';
 import { cn } from '@/lib/cn';
+import { useReskin } from '@/lib/reskin';
 
 export type NodeVisualState = 'center' | 'learned' | 'learnable' | 'locked';
 
@@ -70,8 +71,10 @@ function SkillNodeShapeInner({
   labelScale,
   onSelect,
 }: SkillNodeShapeProps) {
+  const reskin = useReskin();
+  const label = reskin.nodeName(node.id, node.label);
   const r = state === 'center' ? R_CENTER : R;
-  const lines = wrapLabel(node.label);
+  const lines = wrapLabel(label);
   const fontSize = 9.5 * labelScale;
   const lineH = fontSize * 1.05;
   const startY = -((lines.length - 1) * lineH) / 2;
@@ -87,7 +90,7 @@ function SkillNodeShapeInner({
       )}
       role="button"
       tabIndex={0}
-      aria-label={`${node.label}${state === 'learned' ? ', learned' : state === 'learnable' ? ', learnable' : state === 'locked' ? ', locked' : ''}`}
+      aria-label={`${label}${state === 'learned' ? ', learned' : state === 'learnable' ? ', learnable' : state === 'locked' ? ', locked' : ''}`}
       onPointerDown={(e) => {
         // Don't let a node tap start a canvas pan.
         e.stopPropagation();

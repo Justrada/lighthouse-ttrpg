@@ -80,3 +80,30 @@ export const REST_RULES = {
   short: { hpPct: 0, mpPct: 0.5, spPct: 0.5 },
   long: { hpPct: 1, mpPct: 1, spPct: 1 },
 } as const;
+
+// ---------------------------------------------------------------------------
+// Worldforge — creator systems & marketplace
+// ---------------------------------------------------------------------------
+
+/** The platform's facilitation fee on a marketplace sale; the creator keeps the
+ *  remainder. Foundation for the future creator marketplace. Tunable. */
+export const WORLDFORGE_FEE_RATE = 0.15;
+
+/** Descriptors a worldpack may rename. The `key` is the canonical term the
+ *  engine/UI uses internally; a pack maps it to a custom label so a creator can
+ *  re-theme the whole system (e.g. Mind→Tech, Mana→Charge) without touching any
+ *  mechanics. */
+export const RESKINNABLE_TERMS: { key: string; label: string; group: 'Core Stat' | 'Resource' | 'Skill' }[] = [
+  { key: 'Mind', label: 'Mind', group: 'Core Stat' },
+  { key: 'Body', label: 'Body', group: 'Core Stat' },
+  { key: 'Soul', label: 'Soul', group: 'Core Stat' },
+  { key: 'HP', label: 'Health (HP)', group: 'Resource' },
+  { key: 'MP', label: 'Mana (MP)', group: 'Resource' },
+  { key: 'SP', label: 'Stamina (SP)', group: 'Resource' },
+  { key: 'Physical', label: 'Physical', group: 'Skill' },
+  { key: 'Stealth', label: 'Stealth', group: 'Skill' },
+  { key: 'Lore', label: 'Lore', group: 'Skill' },
+  { key: 'Awareness', label: 'Awareness', group: 'Skill' },
+  { key: 'Influence', label: 'Influence', group: 'Skill' },
+  { key: 'Survival', label: 'Survival', group: 'Skill' },
+];

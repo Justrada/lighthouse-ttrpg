@@ -5,3 +5,4 @@ export * from './combat';
 export * from './dice';
 export * from './session';
 export * from './protocol';
+export * from './worldpack';

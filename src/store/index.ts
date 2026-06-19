@@ -3,6 +3,7 @@ export { useRosterStore } from './rosterStore';
 export { useDraftStore } from './draftStore';
 export { useCombatStore } from './combatStore';
 export { useSessionStore } from './sessionStore';
+export { useWorldpackStore } from './worldpackStore';
 export type { PendingCheck } from './sessionStore';
 export * from './selectors';
 export * from './actions';
