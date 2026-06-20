@@ -125,13 +125,13 @@ export function ContentSection({ draft, setDraft }: Props) {
   // Flip an overlay (reskin-only) pack to 'extend' the moment real content is
   // added — otherwise the content the creator just authored silently won't apply.
   const appliesMode = (d: Worldpack): SystemBaseMode => ((d.baseMode ?? 'overlay') === 'overlay' ? 'extend' : (d.baseMode as SystemBaseMode));
-  const addAbility = () =>
+  const addAbility = () => {
+    const base = newAbilityNode();
     setDraft((d) => {
       const c = d.content ?? EMPTY;
       const i = c.nodes.length;
       // Spread new nodes across the editor canvas instead of stacking at 0,0, and
       // auto-number the name so nodes aren't indistinguishable "New Ability"s.
-      const base = newAbilityNode();
       const label = `New Ability ${i + 1}`;
       const node = {
         ...base,
@@ -150,6 +150,9 @@ export function ContentSection({ draft, setDraft }: Props) {
         },
       };
     });
+    setView('map'); // show the visual editor where the new node appears
+    setSelectedId(base.id); // open its editor immediately
+  };
   const updateAbility = (id: string, node: SkillNode) =>
     mutate((c) => ({ ...c, nodes: c.nodes.map((n) => (n.id === id ? node : n)) }));
   const removeAbility = (id: string) =>
@@ -208,24 +211,28 @@ export function ContentSection({ draft, setDraft }: Props) {
         </div>
 
         {view === 'map' ? (
-          <>
+          // Map + the selected skill's editor side-by-side on wide screens (stacked
+          // on narrow), so you can see the tree and shape a skill at the same time.
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] lg:items-start">
             <TreeEditor content={content} mutate={mutate} selectedId={selectedId} onSelect={setSelectedId} onAdd={addAbility} />
-            {selected ? (
-              <AbilityEditor
-                key={selected.id}
-                node={selected}
-                onChange={(n) => updateAbility(selected.id, n)}
-                onRemove={() => {
-                  removeAbility(selected.id);
-                  setSelectedId(null);
-                }}
-              />
-            ) : (
-              <p className="rounded-lg border border-dashed border-line bg-void/30 px-3 py-2 text-xs text-ink-faint">
-                Tap a node on the map to edit it.
-              </p>
-            )}
-          </>
+            <div className="lg:sticky lg:top-20 lg:max-h-[80vh] lg:overflow-auto">
+              {selected ? (
+                <AbilityEditor
+                  key={selected.id}
+                  node={selected}
+                  onChange={(n) => updateAbility(selected.id, n)}
+                  onRemove={() => {
+                    removeAbility(selected.id);
+                    setSelectedId(null);
+                  }}
+                />
+              ) : (
+                <p className="rounded-lg border border-dashed border-line bg-void/30 px-3 py-6 text-center text-xs text-ink-faint">
+                  Tap a node on the map to edit it here, or “New ability” to add one.
+                </p>
+              )}
+            </div>
+          </div>
         ) : (
           <>
             <div className="flex justify-end">
