@@ -3,8 +3,41 @@ import { nanoid } from 'nanoid';
 import { Plus, Trash2, Swords, Wand2, Sparkles, RotateCw } from 'lucide-react';
 import { Input, Textarea, Select, NumberStepper, SegmentedControl, Button, Badge, Divider } from '@/components/ui';
 import type { Worldpack, WorldpackContent, SkillNode, SkillEffect, WorldItem, SystemBaseMode } from '@/types';
+import { parseDiceNotation } from '@/engine/dice';
 import { cn } from '@/lib/cn';
 import { TreeEditor } from './TreeEditor';
+
+/** Validate a dice/amount string the way the engine reads it, with a human preview.
+ *  Accepts dice (2d6, 1d8+1, -1d6) and flat signed integers (+5, 3, -2). */
+function analyzeDice(raw: string): { ok: boolean; preview: string } {
+  const s = (raw ?? '').trim();
+  if (!s) return { ok: false, preview: '' };
+  const p = parseDiceNotation(s);
+  if (p) {
+    const sign = p.negative ? -1 : 1;
+    const a = sign * (p.count + p.modifier);
+    const b = sign * (p.count * p.sides + p.modifier);
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    const avg = Math.round((lo + hi) / 2);
+    return { ok: true, preview: lo === hi ? `= ${lo}` : `rolls ${lo}–${hi} (avg ${avg})` };
+  }
+  if (/^[+-]?\d+$/.test(s)) return { ok: true, preview: `= ${parseInt(s, 10)}` };
+  return { ok: false, preview: 'Not valid — try 2d6, 1d8+1, or a flat number like 3' };
+}
+
+function DicePreview({ value }: { value: string }) {
+  const a = analyzeDice(value);
+  if (!(value ?? '').trim()) return null;
+  return <p className={cn('mt-1 text-[0.7rem]', a.ok ? 'text-beam-soft' : 'text-warn')}>{a.preview}</p>;
+}
+
+/** Sensible field defaults seeded when a creator switches an effect's type, so a
+ *  freshly-switched effect is never a half-configured silent no-op. */
+const EFFECT_TYPE_DEFAULTS: Record<string, Partial<SkillEffect>> = {
+  'Apply Damage': { useWeaponDamage: false, additionalDamage: '1d6' },
+  'Apply Healing': { statToModify: 'HP', modification: '1d6' },
+  'Modify Stat': { statToModify: 'AC', modification: '+1', durationValue: 1, durationUnit: 'Rounds' as never },
+};
 
 /**
  * Creator Studio — author custom Abilities (skills/spells) and Weapons that the
@@ -89,15 +122,32 @@ export function ContentSection({ draft, setDraft }: Props) {
   const setBaseMode = (m: SystemBaseMode) => setDraft((d) => ({ ...d, baseMode: m }));
 
   // --- abilities ---
+  // Flip an overlay (reskin-only) pack to 'extend' the moment real content is
+  // added — otherwise the content the creator just authored silently won't apply.
+  const appliesMode = (d: Worldpack): SystemBaseMode => ((d.baseMode ?? 'overlay') === 'overlay' ? 'extend' : (d.baseMode as SystemBaseMode));
   const addAbility = () =>
-    mutate((c) => {
+    setDraft((d) => {
+      const c = d.content ?? EMPTY;
       const i = c.nodes.length;
-      // Spread new nodes across the editor canvas instead of stacking at 0,0.
-      const node = { ...newAbilityNode(), x: 180 + (i % 4) * 130, y: 70 + Math.floor(i / 4) * 90 };
+      // Spread new nodes across the editor canvas instead of stacking at 0,0, and
+      // auto-number the name so nodes aren't indistinguishable "New Ability"s.
+      const base = newAbilityNode();
+      const label = `New Ability ${i + 1}`;
+      const node = {
+        ...base,
+        x: 180 + (i % 4) * 130,
+        y: 70 + Math.floor(i / 4) * 90,
+        label,
+        linkedItem: { ...base.linkedItem!, name: label },
+      };
       return {
-        ...c,
-        nodes: [...c.nodes, node],
-        edges: [...c.edges, { id: `ed_${nanoid(6)}`, sourceId: 'center-0', targetId: node.id }],
+        ...d,
+        baseMode: appliesMode(d),
+        content: {
+          ...c,
+          nodes: [...c.nodes, node],
+          edges: [...c.edges, { id: `ed_${nanoid(6)}`, sourceId: 'center-0', targetId: node.id }],
+        },
       };
     });
   const updateAbility = (id: string, node: SkillNode) =>
@@ -112,7 +162,13 @@ export function ContentSection({ draft, setDraft }: Props) {
   // --- weapons ---
   const setWeapons = (fn: (w: WorldItem[]) => WorldItem[]) =>
     mutate((c) => ({ ...c, worldItems: { ...c.worldItems, weapons: fn(c.worldItems.weapons ?? []) } }));
-  const addWeapon = () => setWeapons((w) => [...w, newWeapon()]);
+  const addWeapon = () =>
+    setDraft((d) => {
+      const c = d.content ?? EMPTY;
+      const weapons = c.worldItems.weapons ?? [];
+      const weapon = { ...newWeapon(), name: `New Weapon ${weapons.length + 1}` };
+      return { ...d, baseMode: appliesMode(d), content: { ...c, worldItems: { ...c.worldItems, weapons: [...weapons, weapon] } } };
+    });
   const updateWeapon = (id: string, item: WorldItem) => setWeapons((w) => w.map((x) => (x.id === id ? item : x)));
   const removeWeapon = (id: string) => setWeapons((w) => w.filter((x) => x.id !== id));
 
@@ -317,6 +373,7 @@ function WeaponEditor({ item, onChange, onRemove }: { item: WorldItem; onChange:
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Labeled label="Damage (dice)">
           <Input value={item.damage ?? ''} placeholder="2d6+1" mono onChange={(e) => setDamage(e.target.value)} />
+          <DicePreview value={item.damage ?? ''} />
         </Labeled>
         <Labeled label="Range">
           <Select value={item.range ?? 'Melee'} options={RANGES} onChange={(v) => onChange({ ...item, range: v })} aria-label="Weapon range" />
@@ -352,7 +409,7 @@ function WeaponEditor({ item, onChange, onRemove }: { item: WorldItem; onChange:
         {(item.clipSize ?? 0) > 0 && (
           <>
             <Labeled label="Ammo / shot">
-              <NumberStepper value={item.ammoPerShot ?? 1} min={1} max={99} onChange={(v) => onChange({ ...item, ammoPerShot: v })} />
+              <NumberStepper value={item.ammoPerShot ?? 1} min={1} max={item.clipSize ?? 99} onChange={(v) => onChange({ ...item, ammoPerShot: v })} />
             </Labeled>
             <Labeled label="Reserve (0 = ∞)">
               <NumberStepper
@@ -379,10 +436,17 @@ function WeaponEditor({ item, onChange, onRemove }: { item: WorldItem; onChange:
 function EffectEditor({ effect, onChange }: { effect: SkillEffect; onChange: (e: SkillEffect) => void }) {
   const type = String(effect.type);
   const set = (p: Partial<SkillEffect>) => onChange({ ...effect, ...p });
+  const unit = String(effect.durationUnit ?? 'Rounds');
   return (
     <div className="space-y-2">
       <Labeled label="Effect">
-        <Select value={type} options={EFFECT_TYPES} onChange={(v) => onChange({ id: effect.id, type: v })} aria-label="Effect type" />
+        <Select
+          value={type}
+          options={EFFECT_TYPES}
+          // Seed type-appropriate defaults so a freshly-switched effect is never inert.
+          onChange={(v) => onChange({ id: effect.id, type: v, ...EFFECT_TYPE_DEFAULTS[v] })}
+          aria-label="Effect type"
+        />
       </Labeled>
       {type === 'Apply Damage' && (
         <Labeled label="Damage (dice)">
@@ -392,6 +456,7 @@ function EffectEditor({ effect, onChange }: { effect: SkillEffect; onChange: (e:
             mono
             onChange={(e) => set({ additionalDamage: e.target.value, useWeaponDamage: false })}
           />
+          <DicePreview value={String(effect.additionalDamage ?? '')} />
         </Labeled>
       )}
       {type === 'Apply Healing' && (
@@ -406,6 +471,7 @@ function EffectEditor({ effect, onChange }: { effect: SkillEffect; onChange: (e:
           </Labeled>
           <Labeled label="Amount (dice)">
             <Input value={String(effect.modification ?? '')} placeholder="2d6" mono onChange={(e) => set({ modification: e.target.value })} />
+            <DicePreview value={String(effect.modification ?? '')} />
           </Labeled>
         </div>
       )}
@@ -416,22 +482,29 @@ function EffectEditor({ effect, onChange }: { effect: SkillEffect; onChange: (e:
           </Labeled>
           <Labeled label="Amount">
             <Input value={String(effect.modification ?? '')} placeholder="+2 or 1d4" mono onChange={(e) => set({ modification: e.target.value })} />
+            <DicePreview value={String(effect.modification ?? '')} />
           </Labeled>
-          <Labeled label="Duration">
-            <NumberStepper value={Number(effect.durationValue ?? 0)} min={0} max={99} onChange={(v) => set({ durationValue: v })} />
-          </Labeled>
-          <Labeled label="Unit">
+          <Labeled label="Lasts">
             <Select
-              value={String(effect.durationUnit ?? 'Rounds')}
+              value={unit}
               options={DURATION_UNITS}
-              onChange={(v) => set({ durationUnit: v as never })}
+              // Permanent needs no number; otherwise keep a sane >=1 duration (0 = inert).
+              onChange={(v) =>
+                set({ durationUnit: v as never, durationValue: v === 'Permanent' ? (effect.durationValue as number) : Math.max(1, Number(effect.durationValue ?? 0) || 1) })
+              }
               aria-label="Duration unit"
             />
           </Labeled>
+          {unit !== 'Permanent' && (
+            <Labeled label="For (how long)">
+              <NumberStepper value={Math.max(1, Number(effect.durationValue ?? 1))} min={1} max={99} onChange={(v) => set({ durationValue: v })} />
+            </Labeled>
+          )}
         </div>
       )}
       <p className="text-[0.7rem] text-ink-faint">
-        <Badge tone="neutral" size="sm">{type}</Badge> resolves through the same engine as base content.
+        <Badge tone="neutral" size="sm">{type}</Badge>
+        {type === 'Modify Stat' && unit === 'Permanent' ? ' lasts the whole encounter.' : ' resolves through the same engine as base content.'}
       </p>
     </div>
   );
