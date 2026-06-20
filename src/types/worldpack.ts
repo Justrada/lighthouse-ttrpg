@@ -79,4 +79,6 @@ export interface Worldpack {
   published: boolean;
   /** Author-supplied license / usage terms. */
   license?: string;
+  /** Lineage: the pack this one was forked from (for attribution + remixing). */
+  derivedFrom?: { id: string; name: string; author: string };
 }

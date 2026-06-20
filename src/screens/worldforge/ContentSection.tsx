@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { nanoid } from 'nanoid';
 import { Plus, Trash2, Swords, Wand2, Sparkles, RotateCw } from 'lucide-react';
 import { Input, Textarea, Select, NumberStepper, SegmentedControl, Button, Badge, Divider } from '@/components/ui';
 import type { Worldpack, WorldpackContent, SkillNode, SkillEffect, WorldItem, SystemBaseMode } from '@/types';
 import { cn } from '@/lib/cn';
+import { TreeEditor } from './TreeEditor';
 
 /**
  * Creator Studio — author custom Abilities (skills/spells) and Weapons that the
@@ -77,6 +79,10 @@ export function ContentSection({ draft, setDraft }: Props) {
   const abilities = content.nodes;
   const weapons = content.worldItems.weapons ?? [];
 
+  const [view, setView] = useState<'list' | 'map'>('list');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = content.nodes.find((n) => n.id === selectedId) ?? null;
+
   // All content edits go through the latest draft inside the updater.
   const mutate = (fn: (c: WorldpackContent) => WorldpackContent) =>
     setDraft((d) => ({ ...d, content: fn(d.content ?? EMPTY) }));
@@ -85,7 +91,9 @@ export function ContentSection({ draft, setDraft }: Props) {
   // --- abilities ---
   const addAbility = () =>
     mutate((c) => {
-      const node = newAbilityNode();
+      const i = c.nodes.length;
+      // Spread new nodes across the editor canvas instead of stacking at 0,0.
+      const node = { ...newAbilityNode(), x: 180 + (i % 4) * 130, y: 70 + Math.floor(i / 4) * 90 };
       return {
         ...c,
         nodes: [...c.nodes, node],
@@ -129,22 +137,56 @@ export function ContentSection({ draft, setDraft }: Props) {
 
       {/* abilities */}
       <section className="space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="flex items-center gap-1.5 font-display text-xs font-semibold uppercase tracking-[0.18em] text-ink-faint">
             <Wand2 className="h-3.5 w-3.5" /> Custom abilities ({abilities.length})
           </h3>
-          <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={addAbility}>
-            New ability
-          </Button>
+          <SegmentedControl
+            value={view}
+            onChange={(v) => setView(v as 'list' | 'map')}
+            options={[
+              { value: 'list', label: 'List' },
+              { value: 'map', label: 'Map' },
+            ]}
+          />
         </div>
-        {abilities.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line bg-void/30 px-3 py-2 text-xs text-ink-faint">
-            No custom abilities yet. Add one to create a skill or spell learnable from the core node.
-          </p>
+
+        {view === 'map' ? (
+          <>
+            <TreeEditor content={content} mutate={mutate} selectedId={selectedId} onSelect={setSelectedId} onAdd={addAbility} />
+            {selected ? (
+              <AbilityEditor
+                key={selected.id}
+                node={selected}
+                onChange={(n) => updateAbility(selected.id, n)}
+                onRemove={() => {
+                  removeAbility(selected.id);
+                  setSelectedId(null);
+                }}
+              />
+            ) : (
+              <p className="rounded-lg border border-dashed border-line bg-void/30 px-3 py-2 text-xs text-ink-faint">
+                Tap a node on the map to edit it.
+              </p>
+            )}
+          </>
         ) : (
-          abilities.map((node) => (
-            <AbilityEditor key={node.id} node={node} onChange={(n) => updateAbility(node.id, n)} onRemove={() => removeAbility(node.id)} />
-          ))
+          <>
+            <div className="flex justify-end">
+              <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={addAbility}>
+                New ability
+              </Button>
+            </div>
+            {abilities.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-line bg-void/30 px-3 py-2 text-xs text-ink-faint">
+                No custom abilities yet. Add one to create a skill or spell learnable from the core node.
+              </p>
+            ) : (
+              abilities.map((node) => (
+                <AbilityEditor key={node.id} node={node} onChange={(n) => updateAbility(node.id, n)} onRemove={() => removeAbility(node.id)} />
+              ))
+            )}
+          </>
         )}
       </section>
 

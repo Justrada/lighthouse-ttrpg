@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Home, Store, Wand2, Power, Download, Upload, Tag, BadgeCheck, Info } from 'lucide-react';
+import { Home, Store, Wand2, Power, Download, Upload, Tag, BadgeCheck, Info, GitFork } from 'lucide-react';
 import {
   PageShell,
   TopBar,
@@ -14,10 +14,21 @@ import {
 import { Wordmark } from '@/components/brand';
 import { GlowOrb } from '@/components/atmosphere';
 import { useWorldpackStore, useUIStore } from '@/store';
-import { reskinCount, creatorPayout, platformCut } from '@/lib/worldpack';
+import { reskinCount, creatorPayout, platformCut, packKind, contentCounts } from '@/lib/worldpack';
 import { WORLDFORGE_FEE_RATE } from '@/data/constants';
 import type { Worldpack } from '@/types';
 import { cn } from '@/lib/cn';
+
+/** A compact "what's inside" line for a pack card. */
+function packSummary(p: Worldpack): string {
+  const { nodes, items } = contentCounts(p);
+  const parts: string[] = [];
+  if (nodes) parts.push(`${nodes} skill${nodes > 1 ? 's' : ''}`);
+  if (items) parts.push(`${items} item${items > 1 ? 's' : ''}`);
+  const r = reskinCount(p);
+  if (r) parts.push(`${r} reskin${r > 1 ? 's' : ''}`);
+  return parts.join(' · ') || 'empty';
+}
 
 export default function MarketplaceScreen() {
   const navigate = useNavigate();
@@ -25,6 +36,7 @@ export default function MarketplaceScreen() {
   const activeId = useWorldpackStore((s) => s.activeId);
   const setActive = useWorldpackStore((s) => s.setActive);
   const save = useWorldpackStore((s) => s.save);
+  const duplicate = useWorldpackStore((s) => s.duplicate);
   const importPack = useWorldpackStore((s) => s.importPack);
   const pushToast = useUIStore((s) => s.pushToast);
 
@@ -131,6 +143,13 @@ export default function MarketplaceScreen() {
                     <div className="min-w-0">
                       <h3 className="truncate font-display text-base font-semibold text-ink">{p.name}</h3>
                       <p className="truncate text-xs text-ink-faint">{p.author ? `by ${p.author}` : 'unattributed'} · v{p.version}</p>
+                      {p.derivedFrom && (
+                        <p className="truncate text-[0.7rem] text-ink-faint">
+                          <GitFork className="mr-0.5 inline h-3 w-3" />
+                          forked from {p.derivedFrom.name}
+                          {p.derivedFrom.author ? ` · ${p.derivedFrom.author}` : ''}
+                        </p>
+                      )}
                     </div>
                     {p.published ? (
                       <Badge tone="success" variant="soft" size="sm"><BadgeCheck className="mr-1 h-3 w-3" />Listed</Badge>
@@ -153,7 +172,10 @@ export default function MarketplaceScreen() {
                     )}
                   </div>
 
-                  <span className="text-[0.7rem] font-mono text-ink-faint">{reskinCount(p)} reskins</span>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[0.7rem]">
+                    <Badge tone="arcane" variant="soft" size="sm">{packKind(p)}</Badge>
+                    <span className="font-mono text-ink-faint">{packSummary(p)}</span>
+                  </div>
 
                   <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
                     <Button
@@ -177,6 +199,16 @@ export default function MarketplaceScreen() {
                     >
                       {p.published ? 'Unlist' : 'List'}
                     </Button>
+                    <IconButton
+                      aria-label="Fork"
+                      icon={<GitFork />}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const f = duplicate(p.id);
+                        if (f) pushToast({ title: 'Forked', body: `${f.name} added — remix it in the Worldforge.`, tone: 'success' });
+                      }}
+                    />
                     <IconButton aria-label="Export" icon={<Download />} variant="ghost" size="sm" onClick={() => exportPack(p)} />
                   </div>
                 </div>

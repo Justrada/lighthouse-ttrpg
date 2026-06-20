@@ -13,6 +13,7 @@ import {
   Search,
   ArrowLeft,
   Sparkles,
+  GitFork,
 } from 'lucide-react';
 import {
   PageShell,
@@ -31,7 +32,7 @@ import { GlowOrb } from '@/components/atmosphere';
 import { useWorldpackStore, useUIStore } from '@/store';
 import { skillNodes, allWorldItems } from '@/data/skillTree';
 import { RESKINNABLE_TERMS } from '@/data/constants';
-import { createEmptyWorldpack, reskinCount, creatorPayout, platformCut } from '@/lib/worldpack';
+import { createEmptyWorldpack, reskinCount, creatorPayout, platformCut, packKind, contentCounts, sliceWorldpack } from '@/lib/worldpack';
 import type { ReskinEntry, Worldpack } from '@/types';
 import { cn } from '@/lib/cn';
 import { ContentSection } from './worldforge/ContentSection';
@@ -188,11 +189,18 @@ function PackList({ packs, activeId, onNew, onEdit, onHome, onMarket }: PackList
                       <p className="truncate text-xs text-ink-faint">
                         {p.author ? `by ${p.author}` : 'unattributed'} · v{p.version}
                       </p>
+                      {p.derivedFrom && (
+                        <p className="truncate text-[0.7rem] text-ink-faint">
+                          <GitFork className="mr-0.5 inline h-3 w-3" />
+                          forked from {p.derivedFrom.name}
+                        </p>
+                      )}
                     </div>
                     {active && <Badge tone="arcane" variant="soft" size="sm">Active</Badge>}
                   </div>
                   {p.description && <p className="line-clamp-2 text-xs text-ink-muted">{p.description}</p>}
                   <div className="flex flex-wrap items-center gap-2 text-[0.7rem] text-ink-faint">
+                    <Badge tone="arcane" variant="soft" size="sm">{packKind(p)}</Badge>
                     <span className="rounded bg-void/50 px-1.5 py-0.5 font-mono">{reskinCount(p)} reskins</span>
                     <span className="rounded bg-void/50 px-1.5 py-0.5 font-mono">{p.price > 0 ? `${p.price} cr` : 'free'}</span>
                     {p.published && <Badge tone="success" variant="soft" size="sm">Listed</Badge>}
@@ -389,6 +397,15 @@ function PackEditor({ initial, isActive, onClose }: PackEditorProps) {
 }
 
 function DetailsSection({ draft, patch }: { draft: Worldpack; patch: (p: Partial<Worldpack>) => void }) {
+  const pushToast = useUIStore((s) => s.pushToast);
+  const counts = contentCounts(draft);
+  const copyJSON = (pack: Worldpack, label: string) => {
+    const json = JSON.stringify(pack, null, 2);
+    navigator.clipboard?.writeText(json).then(
+      () => pushToast({ title: 'Copied to clipboard', body: `${label} exported as JSON.`, tone: 'success' }),
+      () => pushToast({ title: 'Export', body: json.slice(0, 80) + '…', tone: 'arcane' }),
+    );
+  };
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <Labeled label="System name">
@@ -424,6 +441,25 @@ function DetailsSection({ draft, patch }: { draft: Worldpack; patch: (p: Partial
           platform keeps <span className="text-ink">{platformCut(draft.price)} cr</span> (15%) to facilitate.
         </div>
       )}
+
+      <div className="rounded-xl border border-line bg-surface/40 p-3 sm:col-span-2">
+        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">Package &amp; share</p>
+        <p className="mb-2 text-xs text-ink-muted">
+          Copy this system — or just a slice of it — as JSON to share or sell. A slice becomes its own add-on pack
+          that credits this one.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <Button variant="secondary" size="sm" leftIcon={<Download className="h-4 w-4" />} onClick={() => copyJSON(draft, draft.name)}>
+            Full system
+          </Button>
+          <Button variant="ghost" size="sm" disabled={counts.nodes === 0} onClick={() => copyJSON(sliceWorldpack(draft, 'tree'), 'Skill tree')}>
+            Skill tree only
+          </Button>
+          <Button variant="ghost" size="sm" disabled={counts.items === 0} onClick={() => copyJSON(sliceWorldpack(draft, 'items'), 'Item pack')}>
+            Item pack only
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

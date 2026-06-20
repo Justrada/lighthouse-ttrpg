@@ -227,7 +227,17 @@ export function normalizeWorldpack(raw: unknown): Worldpack {
     price: Number.isFinite(r.price as number) ? Math.max(0, Math.min(1_000_000, Math.trunc(r.price as number))) : 0,
     published: Boolean(r.published),
     license: typeof r.license === 'string' ? r.license.slice(0, 120) : undefined,
+    derivedFrom: cleanDerivedFrom(r.derivedFrom),
   };
+}
+
+function cleanDerivedFrom(v: unknown): Worldpack['derivedFrom'] {
+  if (!v || typeof v !== 'object') return undefined;
+  const d = v as Record<string, unknown>;
+  const name = STR(d.name, 80);
+  const id = STR(d.id, 40);
+  if (!name && !id) return undefined;
+  return { id: id ?? '', name: name ?? 'Unknown', author: STR(d.author, 60) ?? '' };
 }
 
 /** Total reskin overrides in a pack — a quick "how complete is this" measure. */
@@ -237,6 +247,47 @@ export function reskinCount(pack: Worldpack): number {
     Object.keys(pack.reskins.items).length +
     Object.keys(pack.reskins.terms).length
   );
+}
+
+/** How many custom nodes / items a pack carries. */
+export function contentCounts(pack: Worldpack): { nodes: number; items: number } {
+  const nodes = pack.content?.nodes?.length ?? 0;
+  const items = Object.values(pack.content?.worldItems ?? {}).reduce((n, arr) => n + (arr?.length ?? 0), 0);
+  return { nodes, items };
+}
+
+export type PackKind = 'World' | 'Skill Tree' | 'Item Pack' | 'Reskin' | 'Empty';
+
+/** Classify a pack by what it actually contains — drives the marketplace label
+ *  ("sell just a skill tree / item pack / a whole world"). */
+export function packKind(pack: Worldpack): PackKind {
+  const { nodes, items } = contentCounts(pack);
+  if (nodes > 0 && items > 0) return 'World';
+  if (nodes > 0) return 'Skill Tree';
+  if (items > 0) return 'Item Pack';
+  if (reskinCount(pack) > 0) return 'Reskin';
+  return 'Empty';
+}
+
+/** Extract one slice of a pack's content as a NEW additive pack (fresh id, fork
+ *  lineage recorded) — so a creator can package and sell just the skill tree or
+ *  just the item pack out of a larger world. */
+export function sliceWorldpack(pack: Worldpack, slice: 'tree' | 'items'): Worldpack {
+  const content = pack.content ?? { nodes: [], edges: [], worldItems: {} };
+  const sliced =
+    slice === 'tree'
+      ? { nodes: content.nodes, edges: content.edges, worldItems: {} }
+      : { nodes: [], edges: [], worldItems: content.worldItems };
+  return normalizeWorldpack({
+    ...pack,
+    id: nanoid(10),
+    name: `${pack.name} — ${slice === 'tree' ? 'Skill Tree' : 'Item Pack'}`.slice(0, 80),
+    baseMode: 'extend', // a slice is additive content layered on the base
+    content: sliced,
+    reskins: { nodes: {}, items: {}, terms: {} },
+    derivedFrom: { id: pack.id, name: pack.name, author: pack.author },
+    published: false,
+  });
 }
 
 /** The platform's facilitation fee on a sale at `price`. */

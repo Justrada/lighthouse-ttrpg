@@ -86,6 +86,8 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
       published: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      // Record lineage so a fork credits the original creator.
+      derivedFrom: { id: orig.id, name: orig.name, author: orig.author },
     });
     set((s) => {
       const next = [...s.worldpacks, copy];

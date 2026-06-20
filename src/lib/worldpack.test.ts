@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeWorldpack, normalizeWorldpackContent, platformCut, creatorPayout } from './worldpack';
+import {
+  normalizeWorldpack,
+  normalizeWorldpackContent,
+  platformCut,
+  creatorPayout,
+  packKind,
+  contentCounts,
+  sliceWorldpack,
+} from './worldpack';
 import type { Worldpack } from '@/types';
 
 describe('normalizeWorldpack', () => {
@@ -137,5 +145,51 @@ describe('normalizeWorldpackContent — hostile input safety', () => {
       nodes: [{ id: 'n', linkedItem: { id: 'l', type: 'Ability', name: 'A', effects: many } }],
     } as never);
     expect(c.nodes[0].linkedItem!.effects.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('packaging — kind, counts, slices, lineage', () => {
+  const withContent = (over: Record<string, unknown>) =>
+    normalizeWorldpack({ name: 'P', author: 'Ada', baseMode: 'extend', ...over } as never);
+  const node = (id: string) => ({ id, label: id, linkedItem: { id: `${id}-a`, type: 'Ability', name: id, effects: [] } });
+  const item = (id: string) => ({ id, name: id, itemType: 'Weapon', effects: [] });
+
+  it('classifies a pack by what it contains', () => {
+    expect(packKind(normalizeWorldpack({} as never))).toBe('Empty');
+    expect(packKind(normalizeWorldpack({ reskins: { terms: { Mind: 'Wits' } } } as never))).toBe('Reskin');
+    expect(packKind(withContent({ content: { nodes: [node('n1')], edges: [], worldItems: {} } }))).toBe('Skill Tree');
+    expect(packKind(withContent({ content: { nodes: [], edges: [], worldItems: { weapons: [item('w1')] } } }))).toBe('Item Pack');
+    expect(packKind(withContent({ content: { nodes: [node('n1')], edges: [], worldItems: { weapons: [item('w1')] } } }))).toBe('World');
+  });
+
+  it('counts custom nodes and items across buckets', () => {
+    const p = withContent({ content: { nodes: [node('a'), node('b')], edges: [], worldItems: { weapons: [item('w')], armor: [item('ar')] } } });
+    expect(contentCounts(p)).toEqual({ nodes: 2, items: 2 });
+  });
+
+  it('slices a world into a tree-only add-on that credits the original', () => {
+    const world = withContent({
+      name: 'Neon',
+      content: { nodes: [node('n1')], edges: [{ id: 'e', sourceId: 'center-0', targetId: 'n1' }], worldItems: { weapons: [item('w1')] } },
+    });
+    const tree = sliceWorldpack(world, 'tree');
+    expect(tree.id).not.toBe(world.id); // fresh pack
+    expect(tree.baseMode).toBe('extend'); // additive
+    expect(contentCounts(tree)).toEqual({ nodes: 1, items: 0 }); // items dropped
+    expect(tree.content!.edges).toHaveLength(1);
+    expect(tree.derivedFrom).toEqual({ id: world.id, name: 'Neon', author: 'Ada' });
+    expect(tree.published).toBe(false);
+  });
+
+  it('slices a world into an item-only add-on', () => {
+    const world = withContent({ content: { nodes: [node('n1')], edges: [], worldItems: { weapons: [item('w1')] } } });
+    expect(contentCounts(sliceWorldpack(world, 'items'))).toEqual({ nodes: 0, items: 1 });
+  });
+
+  it('normalizes a valid derivedFrom and drops garbage lineage', () => {
+    expect(normalizeWorldpack({ derivedFrom: { id: 'x', name: 'Orig', author: 'Bo' } } as never).derivedFrom).toEqual({ id: 'x', name: 'Orig', author: 'Bo' });
+    expect(normalizeWorldpack({ derivedFrom: 42 } as never).derivedFrom).toBeUndefined();
+    expect(normalizeWorldpack({ derivedFrom: {} } as never).derivedFrom).toBeUndefined();
+    expect(normalizeWorldpack({} as never).derivedFrom).toBeUndefined();
   });
 });
