@@ -34,13 +34,15 @@ import { RESKINNABLE_TERMS } from '@/data/constants';
 import { createEmptyWorldpack, reskinCount, creatorPayout, platformCut } from '@/lib/worldpack';
 import type { ReskinEntry, Worldpack } from '@/types';
 import { cn } from '@/lib/cn';
+import { ContentSection } from './worldforge/ContentSection';
 
-type Section = 'details' | 'terms' | 'skills' | 'items' | 'preview';
+type Section = 'details' | 'terms' | 'skills' | 'items' | 'create' | 'preview';
 const SECTIONS: { value: Section; label: string }[] = [
   { value: 'details', label: 'Details' },
   { value: 'terms', label: 'Terms' },
   { value: 'skills', label: 'Skills' },
   { value: 'items', label: 'Items' },
+  { value: 'create', label: 'Create' },
   { value: 'preview', label: 'Preview' },
 ];
 
@@ -377,6 +379,8 @@ function PackEditor({ initial, isActive, onClose }: PackEditorProps) {
             </div>
           </div>
         )}
+
+        {section === 'create' && <ContentSection draft={draft} setDraft={setDraft} />}
 
         {section === 'preview' && <PreviewSection draft={draft} />}
       </div>
