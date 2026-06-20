@@ -10,6 +10,7 @@ import {
   Shield,
   ChevronRight,
   Replace,
+  RotateCw,
   X,
 } from 'lucide-react';
 import type { ActionType, Combatant, DeclaredAction } from '@/types';
@@ -30,6 +31,7 @@ const typeIcon: Record<ActionType, JSX.Element> = {
   Guard: <Shield className="h-3.5 w-3.5" />,
   'Use Ability': <Sparkles className="h-3.5 w-3.5" />,
   'Weapon Attack': <Swords className="h-3.5 w-3.5" />,
+  Reload: <RotateCw className="h-3.5 w-3.5" />,
   'Use Item': <FlaskConical className="h-3.5 w-3.5" />,
   'Change Equipment': <Replace className="h-3.5 w-3.5" />,
   Flee: <ChevronRight className="h-3.5 w-3.5" />,

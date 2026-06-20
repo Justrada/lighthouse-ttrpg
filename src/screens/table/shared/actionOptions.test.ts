@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { buildActionOptions } from './actionOptions';
 import { autoBuildCharacter } from '@/engine';
+import { setActiveCatalog, buildActiveCatalog, resetActiveCatalog } from '@/data/skillTree';
+import type { WorldItem } from '@/types';
 
 describe('buildActionOptions — consumable targeting', () => {
   it('a thrown damage consumable is a targeted, offensive option', () => {
@@ -45,5 +47,36 @@ describe('buildActionOptions — consumable targeting', () => {
     expect(anti).toBeTruthy();
     expect(anti!.needsTarget).toBe(true); // can be administered to an ally
     expect(anti!.supportive).toBe(true);
+  });
+});
+
+describe('buildActionOptions — weapon ammo', () => {
+  const gun: WorldItem = {
+    id: 'gun', type: 'Inventory Item', name: 'Blaster', description: '', itemType: 'Weapon',
+    range: 'Far', damage: '2d6', clipSize: 4, shots: 2,
+    effects: [{ id: 'e', type: 'Apply Damage', useWeaponDamage: true, additionalDamage: '2d6' }],
+  } as WorldItem;
+
+  afterEach(() => resetActiveCatalog());
+
+  it('offers a Reload action and shows clip/shots on an ammo weapon', () => {
+    setActiveCatalog(buildActiveCatalog({ nodes: [], edges: [], worldItems: { weapons: [gun] } }, 'extend'));
+    const c = autoBuildCharacter({ name: 'G', level: 3, archetype: 'balanced' });
+    c.inventory.weapon = 'gun';
+    const opts = buildActionOptions(c);
+
+    const reload = opts.find((o) => o.actionType === 'Reload');
+    expect(reload).toBeTruthy();
+    expect(reload!.actionId).toBe('gun');
+    expect(reload!.needsTarget).toBe(false);
+
+    const attack = opts.find((o) => o.actionType === 'Weapon Attack' && o.actionId === 'gun');
+    expect(attack!.description).toMatch(/4\/clip/);
+    expect(attack!.description).toMatch(/2 shots/);
+  });
+
+  it('does NOT offer Reload for a no-ammo weapon', () => {
+    const c = autoBuildCharacter({ name: 'M', level: 3, archetype: 'balanced' }); // base melee weapon, no clip
+    expect(buildActionOptions(c).some((o) => o.actionType === 'Reload')).toBe(false);
   });
 });

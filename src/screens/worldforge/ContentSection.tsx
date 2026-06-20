@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { Plus, Trash2, Swords, Wand2, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Swords, Wand2, Sparkles, RotateCw } from 'lucide-react';
 import { Input, Textarea, Select, NumberStepper, SegmentedControl, Button, Badge, Divider } from '@/components/ui';
 import type { Worldpack, WorldpackContent, SkillNode, SkillEffect, WorldItem, SystemBaseMode } from '@/types';
 import { cn } from '@/lib/cn';
@@ -288,6 +288,48 @@ function WeaponEditor({ item, onChange, onRemove }: { item: WorldItem; onChange:
           />
         </Labeled>
       </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Labeled label="Shots / attack">
+          <NumberStepper value={item.shots ?? 1} min={1} max={20} onChange={(v) => onChange({ ...item, shots: v })} />
+        </Labeled>
+        <Labeled label="Clip (0 = no ammo)">
+          <NumberStepper
+            value={item.clipSize ?? 0}
+            min={0}
+            max={999}
+            onChange={(v) =>
+              onChange({
+                ...item,
+                clipSize: v > 0 ? v : undefined,
+                ammoPerShot: v > 0 ? item.ammoPerShot ?? 1 : undefined,
+                reserveAmmo: v > 0 ? item.reserveAmmo : undefined,
+              })
+            }
+          />
+        </Labeled>
+        {(item.clipSize ?? 0) > 0 && (
+          <>
+            <Labeled label="Ammo / shot">
+              <NumberStepper value={item.ammoPerShot ?? 1} min={1} max={99} onChange={(v) => onChange({ ...item, ammoPerShot: v })} />
+            </Labeled>
+            <Labeled label="Reserve (0 = ∞)">
+              <NumberStepper
+                value={item.reserveAmmo ?? 0}
+                min={0}
+                max={9999}
+                onChange={(v) => onChange({ ...item, reserveAmmo: v > 0 ? v : undefined })}
+              />
+            </Labeled>
+          </>
+        )}
+      </div>
+      {(item.clipSize ?? 0) > 0 && (
+        <p className="mt-1 flex items-center gap-1 text-[0.7rem] text-beam-soft">
+          <RotateCw className="h-3 w-3" />
+          Reloadable — {item.clipSize}/clip{(item.shots ?? 1) > 1 ? `, ${item.shots} shots/attack` : ''},{' '}
+          {(item.reserveAmmo ?? 0) > 0 ? `${item.reserveAmmo} in reserve` : 'unlimited reserve'}.
+        </p>
+      )}
     </div>
   );
 }

@@ -99,6 +99,8 @@ function cloneCombatant(c: Combatant): Combatant {
     statusEffects: (c.statusEffects ?? []).map((e) => ({ ...e })),
     deathSaves: { ...c.deathSaves },
     consumables: c.consumables ? { ...c.consumables } : c.consumables,
+    ammo: c.ammo ? { ...c.ammo } : c.ammo,
+    ammoReserve: c.ammoReserve ? { ...c.ammoReserve } : c.ammoReserve,
     lastActionResult: c.lastActionResult ? { ...c.lastActionResult } : c.lastActionResult,
   };
 }
@@ -203,6 +205,22 @@ export function createCombatant(
     consumables[itemId] = (consumables[itemId] ?? 0) + (item.charges ?? 1);
   }
 
+  // Load a clip for any weapon (equipped or carried) that uses ammo, and stock
+  // its finite reserve. Weapons without a clipSize never get an entry → they fire
+  // freely, exactly as before.
+  const ammo: Record<string, number> = {};
+  const ammoReserve: Record<string, number> = {};
+  const weaponIds = [character.inventory?.weapon, ...(character.inventory?.backpack ?? [])];
+  for (const wid of weaponIds) {
+    if (!wid) continue;
+    const w = findItem(wid);
+    if (!w || w.itemType !== 'Weapon' || !w.clipSize || w.clipSize <= 0) continue;
+    ammo[wid] = w.clipSize;
+    if (typeof w.reserveAmmo === 'number' && Number.isFinite(w.reserveAmmo)) {
+      ammoReserve[wid] = Math.max(0, Math.floor(w.reserveAmmo));
+    }
+  }
+
   return {
     id: character.id,
     peerId: opts.peerId ?? null,
@@ -212,6 +230,8 @@ export function createCombatant(
     position,
     equippedWeaponId: undefined,
     consumables,
+    ammo,
+    ammoReserve,
     initiativeBonus: derived.initiative,
     maxHP: derived.hp,
     maxMP: derived.mp,
@@ -1616,9 +1636,67 @@ export function resolveAction(
         pushLog(log, round, `${source.name} tries to attack, but ${target.name} is out of range.`, 'muted');
         break;
       }
-      pushLog(log, round, `${source.name} attacks ${target.name} with ${weapon.name}!`, 'beam');
+      const usesAmmo = typeof weapon.clipSize === 'number' && weapon.clipSize > 0;
+      const perShot = Math.max(1, Math.floor(weapon.ammoPerShot ?? 1));
+      const shots = Math.min(20, Math.max(1, Math.floor(weapon.shots ?? 1))); // cap the burst loop
+      if (usesAmmo) {
+        if (!source.ammo) source.ammo = {};
+        // Lazily load a clip for a weapon that wasn't stocked at creation (e.g. an
+        // NPC or a mid-combat swap), so it isn't permanently empty.
+        if (source.ammo[weapon.id] == null) source.ammo[weapon.id] = weapon.clipSize as number;
+        if ((source.ammo[weapon.id] ?? 0) < perShot) {
+          pushLog(log, round, `${source.name}'s ${weapon.name} clicks empty — reload!`, 'muted');
+          results.push({ kind: 'info', text: `${weapon.name} is empty`, targetId: source.id });
+          break;
+        }
+      }
+      pushLog(log, round, `${source.name} attacks ${target.name} with ${weapon.name}${shots > 1 ? ` (×${shots})` : ''}!`, 'beam');
       const ctx: ApplyContext = { ...ctxBase, data: weapon };
-      resolveUsable(ctx, source, target, weapon, { isWeaponAttack: true });
+      for (let s = 0; s < shots; s += 1) {
+        if (usesAmmo) {
+          if ((source.ammo![weapon.id] ?? 0) < perShot) break; // ran dry mid-burst
+          source.ammo![weapon.id] -= perShot;
+        }
+        // Stop the burst if the target drops partway through.
+        if ((target.currentHP <= 0 && !target.isUnconscious) || target.isUnconscious) break;
+        resolveUsable(ctx, source, target, weapon, { isWeaponAttack: true });
+      }
+      if (usesAmmo) {
+        pushLog(log, round, `${weapon.name}: ${source.ammo![weapon.id] ?? 0}/${weapon.clipSize} loaded.`, 'muted');
+      }
+      break;
+    }
+
+    case 'Reload': {
+      const weaponId = source.equippedWeaponId ?? action.actionId;
+      const weapon = weaponId ? findItem(weaponId) : undefined;
+      if (!weapon || !weapon.clipSize) {
+        pushLog(log, round, `${source.name} has nothing to reload.`, 'muted');
+        break;
+      }
+      if (!source.ammo) source.ammo = {};
+      const loaded = source.ammo[weapon.id] ?? 0;
+      const need = weapon.clipSize - loaded;
+      if (need <= 0) {
+        pushLog(log, round, `${source.name}'s ${weapon.name} is already full.`, 'muted');
+        break;
+      }
+      // Draw from a finite reserve if one is tracked; otherwise the reserve is
+      // unlimited and the clip simply tops off.
+      let drawn = need;
+      if (source.ammoReserve && typeof source.ammoReserve[weapon.id] === 'number') {
+        const reserve = source.ammoReserve[weapon.id];
+        drawn = Math.min(need, reserve);
+        source.ammoReserve[weapon.id] = reserve - drawn;
+      }
+      if (drawn <= 0) {
+        pushLog(log, round, `${source.name} is out of ammo for ${weapon.name}.`, 'muted');
+        results.push({ kind: 'info', text: `No reserve for ${weapon.name}`, targetId: source.id });
+        break;
+      }
+      source.ammo[weapon.id] = loaded + drawn;
+      pushLog(log, round, `${source.name} reloads ${weapon.name} (${source.ammo[weapon.id]}/${weapon.clipSize}).`, 'beam');
+      results.push({ kind: 'info', text: `${source.name} reloads ${weapon.name}`, targetId: source.id });
       break;
     }
 

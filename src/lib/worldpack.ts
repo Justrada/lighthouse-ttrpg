@@ -21,6 +21,10 @@ const MAX_ITEMS = 1000;
 const MAX_EFFECTS = 50;
 const STR = (v: unknown, n: number): string | undefined =>
   typeof v === 'string' && v.trim() ? v.slice(0, n) : undefined;
+/** A finite integer clamped to [lo,hi], or undefined for non-numbers — keeps
+ *  hostile/garbage ammo fields from reaching the engine as NaN or huge loops. */
+const INT = (v: unknown, lo: number, hi: number): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.floor(v))) : undefined;
 
 /** A blank pack ready for the editor. */
 export function createEmptyWorldpack(over: Partial<Worldpack> = {}): Worldpack {
@@ -169,6 +173,11 @@ function cleanContentItems(v: unknown): WorldItems {
       item.name = STR(src.name, 120) ?? 'Custom Item';
       item.itemType = (STR(src.itemType, 30) as WorldItem['itemType']) ?? 'Accessory';
       item.effects = cleanEffects(src.effects);
+      // Ammo module — coerce to bounded ints so the engine can trust them.
+      item.clipSize = INT(src.clipSize, 0, 9999);
+      item.ammoPerShot = INT(src.ammoPerShot, 1, 999);
+      item.shots = INT(src.shots, 1, 50);
+      item.reserveAmmo = INT(src.reserveAmmo, 0, 1_000_000);
       items.push(item);
     }
     out[cat.slice(0, 40)] = items;

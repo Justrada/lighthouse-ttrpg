@@ -85,17 +85,35 @@ export function buildActionOptions(character: Character | null | undefined): Act
     const weaponId = character.inventory?.weapon;
     const weapon = weaponId ? findItem(weaponId) : undefined;
     if (weapon) {
+      const usesAmmo = typeof weapon.clipSize === 'number' && weapon.clipSize > 0;
+      const dmgText = weapon.damage ? `${weapon.damage} ${weapon.damageType ?? ''}`.trim() : weapon.description;
+      const ammoText = usesAmmo
+        ? `${weapon.clipSize}/clip${(weapon.shots ?? 1) > 1 ? `, ${weapon.shots} shots` : ''}`
+        : '';
       options.push({
         key: `weapon:${weapon.id}`,
         actionType: 'Weapon Attack',
         label: weapon.name,
         actionId: weapon.id,
         range: weapon.range ?? 'Melee',
-        description: weapon.damage ? `${weapon.damage} ${weapon.damageType ?? ''}`.trim() : weapon.description,
+        description: [dmgText, ammoText].filter(Boolean).join(' · '),
         needsTarget: true,
         needsLine: false,
         supportive: false,
       });
+      // Reload is offered whenever the weapon uses ammo; the engine no-ops if the
+      // clip is already full, and reports when the reserve is dry.
+      if (usesAmmo) {
+        options.push({
+          key: `reload:${weapon.id}`,
+          actionType: 'Reload',
+          label: `Reload ${weapon.name}`,
+          actionId: weapon.id,
+          description: `Refill the clip (${weapon.clipSize} rounds).`,
+          needsTarget: false,
+          needsLine: false,
+        });
+      }
     } else {
       options.push({
         key: 'weapon:unarmed',

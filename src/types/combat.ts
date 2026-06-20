@@ -23,6 +23,12 @@ export interface Combatant {
   /** Remaining uses of each consumable item id this combat (tallied from the
    *  backpack at creation) so a single potion can't be used indefinitely. */
   consumables?: Record<string, number>;
+  /** Loaded rounds in each ammo weapon's clip this combat (weapon id → loaded).
+   *  Only weapons with a `clipSize` get an entry; Reload refills from reserve. */
+  ammo?: Record<string, number>;
+  /** Spare rounds beyond the loaded clip (weapon id → reserve). A missing entry
+   *  means unlimited reserve (Reload always tops the clip back to full). */
+  ammoReserve?: Record<string, number>;
   initiativeBonus: number;
   maxHP: number;
   maxMP: number;
@@ -45,6 +51,7 @@ export type ActionType =
   | 'Guard'
   | 'Use Ability'
   | 'Weapon Attack'
+  | 'Reload'
   | 'Use Item'
   | 'Change Equipment'
   | 'Flee'

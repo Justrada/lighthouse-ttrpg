@@ -9,6 +9,7 @@ import {
   ChevronRight,
   X,
   Replace,
+  RotateCw,
 } from 'lucide-react';
 import type { ActionType } from '@/types';
 import { Portal, useEscapeKey } from '@/components/ui';
@@ -43,6 +44,7 @@ const typeIcon: Record<ActionType, JSX.Element> = {
   Guard: <Shield className="h-4 w-4" />,
   'Use Ability': <Sparkles className="h-4 w-4" />,
   'Weapon Attack': <Swords className="h-4 w-4" />,
+  Reload: <RotateCw className="h-4 w-4" />,
   'Use Item': <FlaskConical className="h-4 w-4" />,
   'Change Equipment': <Replace className="h-4 w-4" />,
   Flee: <ChevronRight className="h-4 w-4" />,
