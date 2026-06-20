@@ -2,6 +2,7 @@ import type { Character } from './character';
 import type { CombatState, DeclaredAction, CombatLogEntry } from './combat';
 import type { DiceRollResult } from './dice';
 import type { Role } from './session';
+import type { WorldpackContent, SystemBaseMode } from './worldpack';
 
 /**
  * The wire protocol. Every message exchanged between GM and players is one of
@@ -15,6 +16,8 @@ export type GameMessage =
   | { type: 'player_leave'; payload: { peerId: string } }
   | { type: 'character_update'; payload: { character: Character } }
   | { type: 'party_sync'; payload: { members: { peerId: string; character: Character }[] } }
+  // --- world system (custom-content catalog the GM has activated) ---
+  | { type: 'system_sync'; payload: { content: WorldpackContent | null; baseMode: SystemBaseMode } }
   // --- combat lifecycle ---
   | { type: 'combat_start'; payload: { combat: CombatState; seq?: number } }
   | { type: 'combat_update'; payload: { combat: CombatState; seq?: number } }

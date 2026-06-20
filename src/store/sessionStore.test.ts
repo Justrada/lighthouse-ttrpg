@@ -16,7 +16,8 @@ import { useCombatStore } from './combatStore';
 import { createMockTransport, __resetMockBuses, type Transport } from '@/net';
 import { createCombatant } from '@/engine';
 import { performRoll } from './actions';
-import type { Character } from '@/types';
+import { setActiveCatalog, buildActiveCatalog, resetActiveCatalog, findNode } from '@/data/skillTree';
+import type { Character, SkillNode, WorldpackContent } from '@/types';
 
 const flush = async (rounds = 3) => {
   for (let i = 0; i < rounds; i += 1) await new Promise((r) => setTimeout(r, 0));
@@ -267,6 +268,62 @@ describe('sessionStore — room code + party-sync hardening', () => {
     gm.broadcast({ type: 'party_sync', payload: { members: [{ peerId: 'x', character: { id: 'bad', name: 'Bad' } as never }] } });
     await flush();
     expect(useSessionStore.getState().party[0].character.learnedSkills).toContain('center-0');
+    gm.destroy();
+  });
+});
+
+describe('sessionStore — custom System sync', () => {
+  const node = (id: string, over: Partial<SkillNode> = {}): SkillNode => ({
+    id, x: 0, y: 0, label: id, description: '', isCenter: false, linkedItem: null, ...over,
+  });
+  const content = (nodes: SkillNode[]): WorldpackContent => ({ nodes, edges: [], worldItems: {} });
+
+  afterEach(() => resetActiveCatalog());
+
+  it("a joiner's custom skill survives GM-side normalization when the System is active", async () => {
+    // GM has activated a System whose catalog contains a custom node.
+    setActiveCatalog(buildActiveCatalog(content([node('custom-skill', { label: 'Hack' })]), 'extend'));
+    await useSessionStore.getState().hostGame('GM', 'ROOMSYS');
+    player = createMockTransport({ role: 'player', roomCode: 'ROOMSYS' });
+    await player.start();
+
+    const char: Character = { ...validChar('pc', 'Hacker'), learnedSkills: ['center-0', 'custom-skill'] };
+    player.broadcast({ type: 'player_join', payload: { character: char } });
+    await flush();
+
+    // normalizeCharacter (GM side) keeps custom-skill because findNode resolves it
+    // against the active catalog — the load-bearing ordering guarantee.
+    expect(useSessionStore.getState().party[0].character.learnedSkills).toContain('custom-skill');
+  });
+
+  it('a player applies system_sync so custom content resolves locally', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMSYS2' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMSYS2', validChar('pc', 'P'), 'P');
+    await flush();
+    expect(findNode('synced-skill')).toBeUndefined(); // not present before sync
+
+    gm.broadcast({
+      type: 'system_sync',
+      payload: { content: content([node('synced-skill', { label: 'Synced' })]), baseMode: 'extend' },
+    });
+    await flush();
+    expect(findNode('synced-skill')?.label).toBe('Synced'); // now resolves on the player
+    expect(findNode('center-0')).toBeDefined(); // base preserved (extend)
+    gm.destroy();
+  });
+
+  it('a hostile system_sync does not crash and leaves a usable catalog', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMSYS3' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMSYS3', validChar('pc', 'P'), 'P');
+    await flush();
+    gm.broadcast({
+      type: 'system_sync',
+      payload: { content: { nodes: 'garbage', edges: 42, worldItems: null }, baseMode: 'chaos' } as never,
+    });
+    await flush();
+    expect(findNode('center-0')).toBeDefined(); // didn't corrupt the registry
     gm.destroy();
   });
 });

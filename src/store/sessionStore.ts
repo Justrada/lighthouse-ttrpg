@@ -10,8 +10,12 @@ import {
 } from '@/net';
 import { useCombatStore } from './combatStore';
 import { useUIStore } from './uiStore';
+import { useWorldpackStore, ensureActiveCatalog } from './worldpackStore';
 import { normalizeCharacter } from '@/lib/character';
 import { normalizeCombatState } from '@/lib/combat';
+import { normalizeWorldpackContent } from '@/lib/worldpack';
+import { setActiveCatalog, buildActiveCatalog } from '@/data/skillTree';
+import type { SystemBaseMode } from '@/types';
 
 export interface PendingCheck {
   id: string;
@@ -30,6 +34,9 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
   // stale/reordered GM messages can be dropped. Reset on leave / re-baselined
   // by each combat_start.
   let lastRxSeq = -1;
+  // While hosting, re-broadcast the active System whenever the GM switches or
+  // edits it, so players' resolvers stay in lockstep. Torn down on leave.
+  let unsubWorldpack: (() => void) | null = null;
 
   /** Subscribe a transport to this store and the network router. */
   function wire(transport: Transport) {
@@ -70,6 +77,10 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         combat.combat.combatants.some((c) => c.id === id && c.peerId === from);
       switch (msg.type) {
         case 'player_join': {
+          // Bring the joiner's resolver registry in line with the GM's active
+          // System FIRST (before party/combat data) so custom content resolves
+          // for them — and so a joiner who lacks the pack can still play it.
+          transport.send(from, systemSyncMessage());
           const character = normalizeCharacter(msg.payload.character);
           set((s) => {
             const others = s.party.filter((m) => m.peerId !== from);
@@ -149,6 +160,17 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
 
     // --- player role: GM is authoritative ---
     switch (msg.type) {
+      case 'system_sync': {
+        // The GM's active System is authoritative for the session. Build the same
+        // catalog locally so our action menus / sheet / combat resolve identically
+        // — even if we don't own the pack. Content is normalized at this boundary.
+        const baseMode: SystemBaseMode =
+          msg.payload?.baseMode === 'extend' || msg.payload?.baseMode === 'replace'
+            ? msg.payload.baseMode
+            : 'overlay';
+        setActiveCatalog(buildActiveCatalog(normalizeWorldpackContent(msg.payload?.content), baseMode));
+        break;
+      }
       case 'party_sync':
         set({
           party: msg.payload.members.map((m) => {
@@ -214,6 +236,21 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
     get().send({ type: 'party_sync', payload: { members } });
   }
 
+  /** The current active System as a wire message. Only extend/replace packs carry
+   *  mechanical content; an overlay (reskin-only) pack syncs as base. */
+  function systemSyncMessage(): GameMessage {
+    const pack = useWorldpackStore.getState().getActive();
+    const baseMode = (pack?.baseMode ?? 'overlay') as SystemBaseMode;
+    const content = pack && baseMode !== 'overlay' ? pack.content ?? null : null;
+    return { type: 'system_sync', payload: { content, baseMode } };
+  }
+
+  /** GM → all players: push the active System so their resolvers match. */
+  function broadcastActiveSystem() {
+    if (get().role !== 'gm' || !get().transport) return;
+    get().send(systemSyncMessage());
+  }
+
   return {
     role: null,
     roomCode: null,
@@ -236,6 +273,14 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
       try {
         const selfId = await transport.start();
         set({ selfPeerId: selfId, status: 'connected' });
+        // Re-broadcast whenever the GM switches or edits the active System so
+        // players' resolvers track it mid-session (joiners get it on player_join).
+        unsubWorldpack?.();
+        unsubWorldpack = useWorldpackStore.subscribe((s, prev) => {
+          const cur = s.worldpacks.find((p) => p.id === s.activeId);
+          const old = prev.worldpacks.find((p) => p.id === prev.activeId);
+          if (s.activeId !== prev.activeId || cur !== old) broadcastActiveSystem();
+        });
         return code;
       } catch (err) {
         transport.destroy();
@@ -281,8 +326,13 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
 
     leave: () => {
       lastRxSeq = -1;
+      unsubWorldpack?.();
+      unsubWorldpack = null;
       get().transport?.destroy();
       useCombatStore.getState().reset();
+      // Restore our OWN active System — a player may have had the GM's synced over
+      // theirs for the session; reverting keeps solo play on the local pack.
+      ensureActiveCatalog();
       set({
         role: null,
         roomCode: null,

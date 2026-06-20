@@ -32,6 +32,7 @@ const MESSAGE_TYPES = [
   'player_leave',
   'character_update',
   'party_sync',
+  'system_sync',
   'combat_start',
   'combat_update',
   'combat_patch',
