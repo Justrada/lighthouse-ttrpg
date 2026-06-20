@@ -19,12 +19,70 @@ const MAX_NODES = 1000;
 const MAX_EDGES = 2000;
 const MAX_ITEMS = 1000;
 const MAX_EFFECTS = 50;
-const STR = (v: unknown, n: number): string | undefined =>
-  typeof v === 'string' && v.trim() ? v.slice(0, n) : undefined;
+/** Trim, then cap by CODE POINTS (not UTF-16 units) so truncation can't split a
+ *  multi-byte emoji into a lone surrogate. Blank → undefined. */
+const STR = (v: unknown, n: number): string | undefined => {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  return t ? [...t].slice(0, n).join('') : undefined;
+};
 /** A finite integer clamped to [lo,hi], or undefined for non-numbers — keeps
- *  hostile/garbage ammo fields from reaching the engine as NaN or huge loops. */
+ *  hostile/garbage numeric fields from reaching the engine as NaN or huge loops. */
 const INT = (v: unknown, lo: number, hi: number): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.floor(v))) : undefined;
+
+// --- enum canonicalization (case-insensitive + common aliases, safe defaults) ---
+// Imported/hand-authored packs can carry arbitrary strings in fields the studio
+// gates with selects. Coercing them here stops "always out of range" / silent
+// no-op content from ever reaching the engine.
+const RANGES = ['Self', 'Melee', 'Near', 'Far', 'Distant', 'Battlefield'];
+const RANGE_ALIAS: Record<string, string> = { adjacent: 'Melee', reach: 'Melee', touch: 'Melee', unlimited: 'Battlefield', sight: 'Battlefield' };
+function normRange(v: unknown): string | undefined {
+  const s = STR(v, 30);
+  if (!s) return undefined;
+  return RANGES.find((r) => r.toLowerCase() === s.toLowerCase()) ?? RANGE_ALIAS[s.toLowerCase()] ?? 'Melee';
+}
+const HIT_TYPES = ['Auto Hit', 'Roll to Hit'];
+function normHitType(v: unknown): string | undefined {
+  const s = STR(v, 30);
+  if (!s) return undefined;
+  return HIT_TYPES.find((h) => h.toLowerCase() === s.toLowerCase()) ?? 'Roll to Hit';
+}
+const SKILLS = ['Physical', 'Stealth', 'Lore', 'Awareness', 'Influence', 'Survival'];
+function normSkill(v: unknown): string | undefined {
+  const s = STR(v, 30);
+  if (!s) return undefined;
+  return SKILLS.find((k) => k.toLowerCase() === s.toLowerCase()) ?? s; // unknown left as-is (engine reads +0)
+}
+const STAT_CANON: Record<string, string> = {
+  hp: 'HP', mp: 'MP', sp: 'SP', health: 'HP', mana: 'MP', stamina: 'SP', 'hit points': 'HP',
+  'max hp': 'Max HP', 'max mp': 'Max MP', 'max sp': 'Max SP',
+  ac: 'AC', armor: 'AC', armour: 'AC', 'armor class': 'AC', initiative: 'Initiative',
+  physical: 'Physical', stealth: 'Stealth', lore: 'Lore', awareness: 'Awareness', influence: 'Influence', survival: 'Survival',
+  'actions per round': 'Actions Per Round',
+};
+function normStat(v: unknown): string | undefined {
+  const s = STR(v, 40);
+  if (!s) return undefined;
+  return STAT_CANON[s.toLowerCase()] ?? s; // known stats canonicalized; unknown left as-is
+}
+const DURATION_UNITS = ['Instant', 'Rounds', 'Actions', 'Permanent'];
+function normDurationUnit(v: unknown): string | undefined {
+  const s = STR(v, 20);
+  if (!s) return undefined;
+  return DURATION_UNITS.find((u) => u.toLowerCase() === s.toLowerCase()) ?? 'Rounds';
+}
+function normAoe(v: unknown): string | undefined {
+  const s = STR(v, 40);
+  if (!s) return undefined;
+  if (/^single target$/i.test(s)) return 'Single Target';
+  const blast = s.match(/^aoe\b\s*(\d+)?/i);
+  if (blast) return `AOE ${Math.max(1, parseInt(blast[1] ?? '2', 10) || 2)}`;
+  const line = s.match(/^(?:target line|line)\b\s*(\d+)?/i);
+  if (line) return `Target Line ${Math.max(1, parseInt(line[1] ?? '1', 10) || 1)} Row`;
+  return 'Single Target'; // unrecognized → safe single-target
+}
+const RESOURCE_TYPES = ['MP', 'SP', 'HP'];
 
 /** A blank pack ready for the editor. */
 export function createEmptyWorldpack(over: Partial<Worldpack> = {}): Worldpack {
@@ -92,6 +150,15 @@ function cleanEffects(v: unknown): SkillEffect[] {
     if (typeof src.type !== 'string' || !src.type.trim()) continue; // an effect with no type can't resolve
     const eff = cleanLooseFields(src) as SkillEffect;
     if (typeof eff.id !== 'string' || !eff.id) eff.id = nanoid(8);
+    // Clamp duration (coercing numeric strings) + whitelist the unit so an
+    // imported string/negative/huge/garbage duration can't corrupt a Stun/DoT/buff.
+    if ('durationValue' in eff) {
+      const dv = typeof eff.durationValue === 'string' ? Number(eff.durationValue) : eff.durationValue;
+      eff.durationValue = INT(dv, 0, 999);
+    }
+    if (eff.durationUnit != null) eff.durationUnit = normDurationUnit(eff.durationUnit) as never;
+    if (eff.durationType != null) eff.durationType = normDurationUnit(eff.durationType) as never;
+    if (eff.statToModify != null) eff.statToModify = normStat(eff.statToModify); // health->HP, ac casing, etc.
     out.push(eff);
   }
   return out;
@@ -106,6 +173,23 @@ function cleanLinkedItem(v: unknown): LinkedItem | null {
   li.name = STR(src.name, 120) ?? 'Custom';
   li.description = STR(src.description, 600) ?? '';
   li.effects = cleanEffects(src.effects);
+  // Canonicalize combat enums so a typo/case/import can't make the ability
+  // permanently "out of range" or silently unusable.
+  if (li.range != null) li.range = normRange(li.range);
+  if (li.hitType != null) li.hitType = normHitType(li.hitType);
+  if (li.rollModifier != null) li.rollModifier = normSkill(li.rollModifier);
+  if (li.aoe != null) li.aoe = normAoe(li.aoe);
+  // Cost: coerce to a safe {type, value} (non-negative int, valid pool) or drop junk.
+  const rawCost = src.cost as { type?: unknown; value?: unknown } | undefined;
+  if (rawCost && typeof rawCost === 'object' && !Array.isArray(rawCost)) {
+    li.cost = {
+      type: (RESOURCE_TYPES.includes(String(rawCost.type)) ? String(rawCost.type) : 'MP') as never,
+      value: INT(rawCost.value, 0, 99) ?? 0,
+    };
+  } else {
+    const liRec = li as unknown as Record<string, unknown>;
+    if ('cost' in liRec) delete liRec.cost;
+  }
   return li;
 }
 
@@ -118,6 +202,7 @@ function cleanNodes(v: unknown): SkillNode[] {
     const src = n as Record<string, unknown>;
     const id = STR(src.id, 60);
     if (!id || seen.has(id)) continue; // need a unique string id to resolve/override
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue; // proto-pollution guard
     seen.add(id);
     out.push({
       id,
@@ -134,6 +219,7 @@ function cleanNodes(v: unknown): SkillNode[] {
   return out;
 }
 
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 function cleanEdges(v: unknown): SkillEdge[] {
   if (!Array.isArray(v)) return [];
   const out: SkillEdge[] = [];
@@ -144,10 +230,12 @@ function cleanEdges(v: unknown): SkillEdge[] {
     const sourceId = STR(src.sourceId, 60);
     const targetId = STR(src.targetId, 60);
     if (!sourceId || !targetId) continue;
-    const id = STR(src.id, 80) ?? `${sourceId}->${targetId}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, sourceId, targetId });
+    if (PROTO_KEYS.has(sourceId) || PROTO_KEYS.has(targetId)) continue; // proto-pollution guard
+    if (sourceId === targetId) continue; // a self-loop prerequisite is meaningless
+    const pair = `${sourceId}->${targetId}`;
+    if (seen.has(pair)) continue; // de-dup by ENDPOINTS, not id (honest prerequisite counts)
+    seen.add(pair);
+    out.push({ id: STR(src.id, 80) ?? pair, sourceId, targetId });
   }
   return out;
 }
@@ -187,6 +275,14 @@ function cleanContentItems(v: unknown): WorldItems {
       item.ammoPerShot = INT(src.ammoPerShot, 1, 999);
       item.shots = INT(src.shots, 1, 50);
       item.reserveAmmo = INT(src.reserveAmmo, 0, 1_000_000);
+      // Canonicalize weapon combat enums + cross-clamp ammo so a shot can never
+      // cost more than the clip holds (which would jam the gun forever).
+      const ix = item as unknown as Record<string, unknown>;
+      if (item.range != null) item.range = normRange(item.range);
+      if (ix.aoe != null) ix.aoe = normAoe(ix.aoe);
+      if (ix.hitType != null) ix.hitType = normHitType(ix.hitType);
+      if (ix.rollModifier != null) ix.rollModifier = normSkill(ix.rollModifier);
+      if (item.clipSize && item.ammoPerShot && item.ammoPerShot > item.clipSize) item.ammoPerShot = item.clipSize;
       items.push(item);
     }
     out[cat.slice(0, 40)] = items;
@@ -201,11 +297,13 @@ function cleanContentItems(v: unknown): WorldItems {
  */
 export function normalizeWorldpackContent(raw: unknown): WorldpackContent {
   const r = (raw ?? {}) as Partial<WorldpackContent>;
-  return {
-    nodes: cleanNodes(r.nodes),
-    edges: cleanEdges(r.edges),
-    worldItems: cleanContentItems(r.worldItems),
-  };
+  const nodes = cleanNodes(r.nodes);
+  // Drop dangling prerequisite edges (an endpoint that isn't a real node) so they
+  // can't create phantom tier entries or unreachable links. center-0 is always valid.
+  const ids = new Set(nodes.map((n) => n.id));
+  ids.add('center-0');
+  const edges = cleanEdges(r.edges).filter((e) => ids.has(e.sourceId) && ids.has(e.targetId));
+  return { nodes, edges, worldItems: cleanContentItems(r.worldItems) };
 }
 
 /**

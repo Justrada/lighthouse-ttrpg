@@ -230,3 +230,55 @@ describe('weapon double-damage heal', () => {
     expect(c.nodes[0].linkedItem!.effects[0].useWeaponDamage).toBe(true);
   });
 });
+
+describe('normalize hardening — enums / cost / duration / edges / ammo', () => {
+  const node = (over: Record<string, unknown>) => ({ id: 'n', label: 'n', linkedItem: { id: 'a', type: 'Ability', name: 'A', effects: [], ...over } });
+
+  it('coerces cost to a non-negative int + valid pool', () => {
+    const c = normalizeWorldpackContent({ nodes: [node({ cost: { type: 'XP', value: -5 } })] } as never);
+    expect(c.nodes[0].linkedItem!.cost).toEqual({ type: 'MP', value: 0 });
+    const c2 = normalizeWorldpackContent({ nodes: [node({ cost: { type: 'SP', value: 2.9 } })] } as never);
+    expect(c2.nodes[0].linkedItem!.cost).toEqual({ type: 'SP', value: 2 });
+  });
+
+  it('canonicalizes range / hitType / aoe (case + aliases + safe default)', () => {
+    const l = normalizeWorldpackContent({ nodes: [node({ range: 'near', hitType: 'auto hit', aoe: 'aoe 4' })] } as never).nodes[0].linkedItem!;
+    expect(l.range).toBe('Near');
+    expect(l.hitType).toBe('Auto Hit');
+    expect(l.aoe).toBe('AOE 4');
+    expect(normalizeWorldpackContent({ nodes: [node({ range: 'adjacent' })] } as never).nodes[0].linkedItem!.range).toBe('Melee');
+    expect(normalizeWorldpackContent({ nodes: [node({ range: '???' })] } as never).nodes[0].linkedItem!.range).toBe('Melee');
+  });
+
+  it('coerces effect duration (numeric string → int, clamps) + unit whitelist + stat alias', () => {
+    const e = (over: Record<string, unknown>) => ({ id: 'e', type: 'Modify Stat', statToModify: 'health', modification: '+5', ...over });
+    const eff = normalizeWorldpackContent({ nodes: [node({ effects: [e({ durationValue: '3', durationUnit: 'forever' })] })] } as never).nodes[0].linkedItem!.effects[0];
+    expect(eff.durationValue).toBe(3);
+    expect(eff.durationUnit).toBe('Rounds');
+    expect(eff.statToModify).toBe('HP');
+    expect(normalizeWorldpackContent({ nodes: [node({ effects: [e({ durationValue: -9 })] })] } as never).nodes[0].linkedItem!.effects[0].durationValue).toBe(0);
+  });
+
+  it('clamps ammoPerShot to clipSize (no permanently-jammed gun)', () => {
+    const c = normalizeWorldpackContent({ worldItems: { weapons: [{ id: 'g', name: 'G', itemType: 'Weapon', clipSize: 3, ammoPerShot: 9, effects: [] }] } } as never);
+    expect(c.worldItems.weapons[0].ammoPerShot).toBe(3);
+  });
+
+  it('drops dangling + self-loop edges and de-dups by endpoint pair', () => {
+    const c = normalizeWorldpackContent({
+      nodes: [{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }],
+      edges: [
+        { id: 'e1', sourceId: 'center-0', targetId: 'a' },
+        { id: 'e2', sourceId: 'center-0', targetId: 'a' }, // duplicate pair
+        { id: 'e3', sourceId: 'a', targetId: 'a' }, // self-loop
+        { id: 'e4', sourceId: 'a', targetId: 'ghost' }, // dangling
+        { id: 'e5', sourceId: 'a', targetId: 'b' },
+      ],
+    } as never);
+    expect(c.edges.map((e) => `${e.sourceId}->${e.targetId}`)).toEqual(['center-0->a', 'a->b']);
+  });
+
+  it('trims node names', () => {
+    expect(normalizeWorldpackContent({ nodes: [{ id: 'n', label: '  Spacey  ' }] } as never).nodes[0].label).toBe('Spacey');
+  });
+});

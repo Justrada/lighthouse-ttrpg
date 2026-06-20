@@ -602,6 +602,10 @@ function spendResource(
   resource: 'HP' | 'MP' | 'SP',
   amount: number,
 ): SpendResult {
+  // Clamp the cost to a non-negative integer: a negative cost would REFUND the
+  // resource (and overheal HP past max) — a resource-printer exploit — and a
+  // non-finite cost would poison the pool. A 0 cost is a free, always-castable ability.
+  amount = Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 0;
   const key = `current${resource}` as ResourceKey;
   const current = combatant[key] ?? 0;
   const spent = { HP: 0, MP: 0, SP: 0 };
@@ -1013,6 +1017,24 @@ function applyEffect(
       }
 
       const upper = statKey.toUpperCase();
+      // A permanent or untimed buff on a NON-pool stat (AC/Initiative/skills) must
+      // still apply — via a no-expire status effect that effectiveStats reads.
+      // Without this, "+5 AC, Permanent" (the natural way to author a passive) and
+      // any duration-0 stat buff silently did nothing.
+      if (upper !== 'HP' && upper !== 'MP' && upper !== 'SP') {
+        const statEffect = createStatusEffect(effect, { sourceId: source.id, sourceName: name, sourceTeam: source.team });
+        statEffect.rolledValue = value;
+        // Persist forever: effectiveStats requires durationValue>0; tickDurations
+        // never decrements a 'Permanent' effect.
+        statEffect.durationUnit = 'Permanent';
+        statEffect.durationType = 'Permanent';
+        statEffect.durationValue = 1;
+        target.statusEffects.push(statEffect);
+        pushLog(log, round, `${target.name}'s ${statKey} ${value >= 0 ? 'rises' : 'falls'} by ${Math.abs(value)}.`, value >= 0 ? 'success' : 'danger');
+        results.push({ kind: 'effect', text: `${target.name}: ${statKey} ${value >= 0 ? '+' : ''}${value}`, targetId: target.id });
+        break;
+      }
+
       if (upper === 'HP' || upper === 'MP' || upper === 'SP') {
         const before = target.currentHP;
         modifyResource(target, upper as 'HP' | 'MP' | 'SP', value);
