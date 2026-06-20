@@ -13,7 +13,7 @@ import {
 import { motion } from 'framer-motion';
 import type { ItemCategory, WorldItem } from '@/types';
 import { useDraftStore } from '@/store';
-import { worldItems, findItem } from '@/data/skillTree';
+import { getActiveWorldItems, findItem } from '@/data/skillTree';
 import { Badge, Button, SegmentedControl, EmptyState, Divider } from '@/components/ui';
 import { describeEffect } from '@/components/skilltree';
 import { cn } from '@/lib/cn';
@@ -64,7 +64,8 @@ export function EquipmentSection() {
   const addToBackpack = useDraftStore((s) => s.addToBackpack);
   const removeFromBackpack = useDraftStore((s) => s.removeFromBackpack);
 
-  const categories = useMemo(() => Object.keys(worldItems), []);
+  const worldItems = getActiveWorldItems();
+  const categories = useMemo(() => Object.keys(worldItems), [worldItems]);
   const [category, setCategory] = useState<string>(categories[0] ?? 'weapons');
 
   if (!draft) return null;

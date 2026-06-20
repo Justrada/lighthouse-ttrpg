@@ -1,5 +1,5 @@
 import type { Character, SkillPointBudget } from '@/types';
-import { prerequisitesOf, skillEdges, skillNodes } from '@/data/skillTree';
+import { prerequisitesOf, findNode, getActiveNodes, getActiveEdges } from '@/data/skillTree';
 import { calculateSkillBudget, getSkillCost } from './stats';
 
 /** Whether `nodeId` is in the character's learned set. */
@@ -37,7 +37,7 @@ export function canLearnSkill(
   nodeId: string,
   budget: SkillPointBudget = calculateSkillBudget(character),
 ): LearnCheck {
-  const node = skillNodes.find((n) => n.id === nodeId);
+  const node = findNode(nodeId);
   if (!node) return { ok: false, reason: 'Unknown skill node.' };
   if (node.isCenter) return { ok: false, reason: 'The center is already unlocked.' };
   if (isLearned(character, nodeId)) return { ok: false, reason: 'Already learned.' };
@@ -65,7 +65,7 @@ export function canLearnSkill(
  */
 export function getReachableNodes(character: Character): string[] {
   const budget = calculateSkillBudget(character);
-  return skillNodes
+  return getActiveNodes()
     .filter((n) => canLearnSkill(character, n.id, budget).ok)
     .map((n) => n.id);
 }
@@ -98,7 +98,7 @@ function reachableLearnedSet(learned: Set<string>): Set<string> {
   reachable.add('center-0');
   while (queue.length > 0) {
     const current = queue.shift()!;
-    for (const edge of skillEdges) {
+    for (const edge of getActiveEdges()) {
       if (edge.sourceId !== current) continue;
       const next = edge.targetId;
       if (learned.has(next) && !reachable.has(next)) {

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useDraftStore, useUIStore } from '@/store';
-import { skillNodes, skillEdges, findNode } from '@/data/skillTree';
+import { getActiveNodes, getActiveEdges, findNode } from '@/data/skillTree';
 import { SkillTreeGraph, NodeInfoPanel } from '@/components/skilltree';
 import { cn } from '@/lib/cn';
 
@@ -29,7 +29,7 @@ export function SkillTreeSection() {
   const learnableSet = useMemo(() => {
     const set = new Set<string>();
     if (!draft) return set;
-    for (const n of skillNodes) {
+    for (const n of getActiveNodes()) {
       if (canLearn(n.id).ok) set.add(n.id);
     }
     return set;
@@ -118,8 +118,8 @@ export function SkillTreeSection() {
           )}
         >
           <SkillTreeGraph
-            nodes={skillNodes}
-            edges={skillEdges}
+            nodes={getActiveNodes()}
+            edges={getActiveEdges()}
             learnedIds={learnedIds}
             isLearnable={isLearnable}
             selectedId={selectedId}

@@ -4,6 +4,7 @@ import type { Character } from '@/types';
 import type { RosterStore } from './contracts';
 import { loadJSON, saveJSON, KEYS } from './persistence';
 import { normalizeCharacter } from '@/lib/character';
+import { ensureActiveCatalog } from './worldpackStore';
 
 function persist(characters: Character[]) {
   saveJSON(KEYS.characters, characters);
@@ -11,6 +12,11 @@ function persist(characters: Character[]) {
 
 /** Load + normalize persisted characters so legacy/partial data can't crash the app. */
 function loadCharacters(): Character[] {
+  // Apply the active System FIRST: normalizeCharacter drops skill ids findNode
+  // doesn't recognize, so a custom-skill character would lose those skills if the
+  // custom catalog weren't active yet. Importing worldpackStore also guarantees
+  // it has evaluated (and applied the catalog) before this runs.
+  ensureActiveCatalog();
   const raw = loadJSON<unknown[]>(KEYS.characters, []);
   return Array.isArray(raw) ? raw.map((c) => normalizeCharacter(c as Character)) : [];
 }

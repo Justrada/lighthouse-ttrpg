@@ -4,6 +4,7 @@ import type { Worldpack } from '@/types';
 import type { WorldpackStore } from './contracts';
 import { loadJSON, saveJSON, KEYS } from './persistence';
 import { normalizeWorldpack } from '@/lib/worldpack';
+import { setActiveCatalog, buildActiveCatalog } from '@/data/skillTree';
 
 function loadPacks(): Worldpack[] {
   const raw = loadJSON<unknown[]>(KEYS.worldpacks, []);
@@ -14,11 +15,33 @@ function loadActive(): string | null {
   return loadJSON<string | null>(KEYS.activeWorldpack, null);
 }
 
+/** Push the active pack's custom content into the resolver registry (base when
+ *  there's no active pack or it's overlay-only). Keeps findNode/findItem and the
+ *  Forge/combat in sync with the activated System. */
+function applyCatalog(packs: Worldpack[], activeId: string | null): void {
+  const pack = packs.find((p) => p.id === activeId) ?? null;
+  setActiveCatalog(pack ? buildActiveCatalog(pack.content, pack.baseMode ?? 'overlay') : null);
+}
+
+/** Idempotently apply the persisted active System to the resolver registry.
+ *  rosterStore calls this BEFORE it normalizes saved characters — otherwise a
+ *  character's custom skills would be dropped by normalizeCharacter (findNode). */
+export function ensureActiveCatalog(): void {
+  const { worldpacks, activeId } = useWorldpackStore.getState();
+  applyCatalog(worldpacks, activeId);
+}
+
 export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
   worldpacks: loadPacks(),
   activeId: loadActive(),
 
-  load: () => set({ worldpacks: loadPacks(), activeId: loadActive() }),
+  load: () =>
+    set(() => {
+      const worldpacks = loadPacks();
+      const activeId = loadActive();
+      applyCatalog(worldpacks, activeId);
+      return { worldpacks, activeId };
+    }),
 
   get: (id) => get().worldpacks.find((p) => p.id === id),
 
@@ -35,6 +58,9 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
         ? s.worldpacks.map((p) => (p.id === finalized.id ? finalized : p))
         : [...s.worldpacks, finalized];
       saveJSON(KEYS.worldpacks, next);
+      // If the edited pack is the active System, re-apply so content edits take
+      // effect live (the Forge/combat see the new nodes/items immediately).
+      if (s.activeId === finalized.id) applyCatalog(next, s.activeId);
       return { worldpacks: next };
     }),
 
@@ -43,7 +69,10 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
       const next = s.worldpacks.filter((p) => p.id !== id);
       saveJSON(KEYS.worldpacks, next);
       const activeId = s.activeId === id ? null : s.activeId;
-      if (activeId !== s.activeId) saveJSON(KEYS.activeWorldpack, activeId);
+      if (activeId !== s.activeId) {
+        saveJSON(KEYS.activeWorldpack, activeId);
+        applyCatalog(next, activeId); // dropped the active pack → fall back to base
+      }
       return { worldpacks: next, activeId };
     }),
 
@@ -67,8 +96,9 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
   },
 
   setActive: (id) =>
-    set(() => {
+    set((s) => {
       saveJSON(KEYS.activeWorldpack, id);
+      applyCatalog(s.worldpacks, id);
       return { activeId: id };
     }),
 
@@ -93,3 +123,8 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
     return pack;
   },
 }));
+
+// Apply the persisted active System to the resolver registry as soon as this
+// module loads — rosterStore imports `ensureActiveCatalog`, which forces this to
+// run before any saved character is normalized, so custom skills survive load.
+ensureActiveCatalog();

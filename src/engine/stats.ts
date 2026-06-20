@@ -5,7 +5,7 @@ import type {
   SkillEffect,
   SkillPointBudget,
 } from '@/types';
-import { findItem, findNode, skillEdges } from '@/data/skillTree';
+import { findItem, findNode, getActiveEdges, getCatalogVersion } from '@/data/skillTree';
 
 /** Zeroed bonus accumulator covering every derived stat plus the shield bucket. */
 interface StatBonuses {
@@ -239,6 +239,7 @@ export function getStatCost(currentValue: number): number {
 }
 
 let _tierCache: Record<string, number> | null = null;
+let _tierCacheVersion = -1;
 
 /**
  * BFS tier of every node from `center-0` over the directed edge graph
@@ -246,7 +247,10 @@ let _tierCache: Record<string, number> | null = null;
  * Memoized — the skill graph is static data.
  */
 export function getSkillTiers(): Record<string, number> {
-  if (_tierCache) return _tierCache;
+  // Keyed by catalog version so activating a custom System (different edges)
+  // rebuilds the tiers instead of serving stale base-tree costs.
+  const version = getCatalogVersion();
+  if (_tierCache && _tierCacheVersion === version) return _tierCache;
 
   const tiers: Record<string, number> = {};
   const processed = new Set<string>();
@@ -260,7 +264,7 @@ export function getSkillTiers(): Record<string, number> {
     processed.add(nodeId);
     tiers[nodeId] = tier;
 
-    for (const edge of skillEdges) {
+    for (const edge of getActiveEdges()) {
       if (edge.sourceId === nodeId) {
         queue.push({ nodeId: edge.targetId, tier: tier + 1 });
       }
@@ -268,6 +272,7 @@ export function getSkillTiers(): Record<string, number> {
   }
 
   _tierCache = tiers;
+  _tierCacheVersion = version;
   return tiers;
 }
 
