@@ -16,7 +16,9 @@ import { useCombatStore } from './combatStore';
 import { createMockTransport, __resetMockBuses, type Transport } from '@/net';
 import { createCombatant } from '@/engine';
 import { performRoll } from './actions';
-import { setActiveCatalog, buildActiveCatalog, resetActiveCatalog, findNode } from '@/data/skillTree';
+import { setActiveCatalog, buildActiveCatalog, resetActiveCatalog, findNode, findItem } from '@/data/skillTree';
+import { useWorldpackStore } from '@/store/worldpackStore';
+import { normalizeWorldpack } from '@/lib/worldpack';
 import type { Character, SkillNode, WorldpackContent } from '@/types';
 
 const flush = async (rounds = 3) => {
@@ -324,6 +326,37 @@ describe('sessionStore — custom System sync', () => {
     });
     await flush();
     expect(findNode('center-0')).toBeDefined(); // didn't corrupt the registry
+    gm.destroy();
+  });
+
+  it('a player activating a local pack mid-session does NOT clobber the GM-synced catalog', async () => {
+    const gm = createMockTransport({ role: 'gm', roomCode: 'ROOMLOCK' });
+    await gm.start();
+    await useSessionStore.getState().joinGame('ROOMLOCK', validChar('pc', 'P'), 'P');
+    await flush();
+    // GM syncs a System whose weapon 'blade' is a Plasma Saber.
+    gm.broadcast({
+      type: 'system_sync',
+      payload: {
+        content: { nodes: [], edges: [], worldItems: { weapons: [{ id: 'blade', type: 'Inventory Item', name: 'Plasma Saber', itemType: 'Weapon', damage: '2d10', effects: [] }] } },
+        baseMode: 'extend',
+      } as never,
+    });
+    await flush();
+    expect(findItem('blade')?.name).toBe('Plasma Saber');
+
+    // The player saves + activates a LOCAL pack that also defines 'blade' (Rusty Knife).
+    const local = normalizeWorldpack({
+      name: 'Local', baseMode: 'extend',
+      content: { nodes: [], edges: [], worldItems: { weapons: [{ id: 'blade', name: 'Rusty Knife', itemType: 'Weapon', damage: '1d4', effects: [] }] } },
+    } as never);
+    useWorldpackStore.getState().save(local);
+    useWorldpackStore.getState().setActive(local.id);
+    await flush();
+    // The session lock keeps the GM's synced content authoritative.
+    expect(findItem('blade')?.name).toBe('Plasma Saber');
+
+    useWorldpackStore.getState().remove(local.id); // cleanup so it can't leak to other tests
     gm.destroy();
   });
 });

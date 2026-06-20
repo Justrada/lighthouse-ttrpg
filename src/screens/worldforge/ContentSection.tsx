@@ -62,7 +62,7 @@ function newWeapon(): WorldItem {
     id: `ci_${nanoid(6)}`, type: 'Inventory Item', name: 'New Weapon', description: '',
     itemType: 'Weapon', range: 'Melee', damage: '1d6', combatUse: true, aoe: 'Single Target',
     hitType: 'Roll to Hit', rollModifier: 'Physical',
-    effects: [{ id: `e_${nanoid(6)}`, type: 'Apply Damage', useWeaponDamage: true, additionalDamage: '1d6' }],
+    effects: [{ id: `e_${nanoid(6)}`, type: 'Apply Damage', useWeaponDamage: false, additionalDamage: '1d6' }],
   } as WorldItem;
 }
 
@@ -294,7 +294,7 @@ function WeaponEditor({ item, onChange, onRemove }: { item: WorldItem; onChange:
   // engine's computeDamage (which reads the equipped weapon's effect) matches.
   const setDamage = (damage: string) => {
     const effects: SkillEffect[] = [
-      { id: item.effects[0]?.id ?? `e_${nanoid(6)}`, type: 'Apply Damage', useWeaponDamage: true, additionalDamage: damage },
+      { id: item.effects[0]?.id ?? `e_${nanoid(6)}`, type: 'Apply Damage', useWeaponDamage: false, additionalDamage: damage },
     ];
     onChange({ ...item, damage, effects });
   };

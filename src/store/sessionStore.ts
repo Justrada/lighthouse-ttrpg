@@ -10,7 +10,7 @@ import {
 } from '@/net';
 import { useCombatStore } from './combatStore';
 import { useUIStore } from './uiStore';
-import { useWorldpackStore, ensureActiveCatalog } from './worldpackStore';
+import { useWorldpackStore, ensureActiveCatalog, setWorldpackSessionLock } from './worldpackStore';
 import { normalizeCharacter } from '@/lib/character';
 import { normalizeCombatState } from '@/lib/combat';
 import { normalizeWorldpackContent } from '@/lib/worldpack';
@@ -310,6 +310,9 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         transport.broadcast({ type: 'hello', payload: { role: 'player', name: playerName } });
         transport.broadcast({ type: 'player_join', payload: { character: safeCharacter } });
         set({ status: 'connected' });
+        // The GM's System is authoritative for the session — stop our local pack
+        // activations from clobbering the synced catalog until we leave.
+        setWorldpackSessionLock(true);
       } catch (err) {
         transport.destroy();
         set({
@@ -332,6 +335,7 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
       useCombatStore.getState().reset();
       // Restore our OWN active System — a player may have had the GM's synced over
       // theirs for the session; reverting keeps solo play on the local pack.
+      setWorldpackSessionLock(false);
       ensureActiveCatalog();
       set({
         role: null,

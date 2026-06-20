@@ -116,4 +116,47 @@ describe('weapon ammo', () => {
     expect(foeOf(s).currentHP).toBeLessThan(100); // kept swinging
     expect(atkOf(s).ammo?.blade).toBeUndefined();
   });
+
+  // Regression: a kill before the last shot must not waste an ammo round.
+  it('does not over-debit ammo when the kill lands before the final shot', () => {
+    const { state } = setup('autogun'); // shots:3, clipSize:6
+    foeOf(state).currentHP = 1;
+    foeOf(state).maxHP = 1; // dies on shot 1
+    const after = resolveAction(state, fire('autogun'), maxRng);
+    expect(after.log.filter((l) => /takes \d+ damage/.test(l.text)).length).toBe(1); // burst stopped
+    expect(atkOf(after.state).ammo?.autogun).toBe(5); // 6 - 1 round (not 4)
+  });
+});
+
+describe('multi-shot AOE burst', () => {
+  const scatter = {
+    id: 'scatter', type: 'Inventory Item', name: 'Scatter', description: '', itemType: 'Weapon',
+    range: 'Battlefield', damage: '1d6', rollModifier: 'Physical', hitType: 'Auto Hit', aoe: 'AOE 4',
+    clipSize: 9, ammoPerShot: 1, shots: 3,
+    effects: [{ id: 'e', type: 'Apply Damage', useWeaponDamage: false, additionalDamage: '1d6' }],
+  } as unknown as WorldItem;
+
+  const ch = (id: string, w?: string): Character =>
+    ({
+      id, name: id, level: 3, coreStats: { mind: 6, body: 6, soul: 6 }, learnedSkills: ['center-0'],
+      inventory: { armor: null, weapon: w ?? null, shield: null, accessories: [], backpack: [] },
+      currentHP: 100, currentMP: 50, currentSP: 50,
+    }) as Character;
+
+  it('keeps hitting a live bystander after the primary target dies mid-burst', () => {
+    setActiveCatalog(buildActiveCatalog({ nodes: [], edges: [], worldItems: { weapons: [scatter] } }, 'extend'));
+    const atk = createCombatant(ch('atk', 'scatter'), { team: 'player', position: { q: 0, r: 0 } });
+    const primary = createCombatant(ch('primary'), { team: 'npc', position: { q: 5, r: 0 } });
+    const bystander = createCombatant(ch('bystander'), { team: 'npc', position: { q: 6, r: 0 } }); // dist 1 from primary, in radius
+    primary.currentHP = 1; primary.maxHP = 1; // dies on shot 1
+    bystander.currentHP = 100000; bystander.maxHP = 100000;
+    const state: CombatState = {
+      isActive: true, phase: 'resolving', round: 1, combatants: [atk, primary, bystander],
+      declaredActions: {}, lockedActions: {}, resolutionQueue: [], activeResolutionIndex: -1, log: [],
+    };
+    const act = { actionIndex: 0, actionType: 'Weapon Attack', sourceId: 'atk', targetId: 'primary', actionId: 'scatter', initiative: 1 } as ResolvedAction;
+    const after = resolveAction(state, act, maxRng);
+    const bystanderHits = after.log.filter((l) => /bystander takes \d+ damage/.test(l.text)).length;
+    expect(bystanderHits).toBe(3); // all 3 shots land on the survivor (burst not aborted by primary's death)
+  });
 });

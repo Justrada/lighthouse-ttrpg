@@ -192,4 +192,41 @@ describe('packaging — kind, counts, slices, lineage', () => {
     expect(normalizeWorldpack({ derivedFrom: {} } as never).derivedFrom).toBeUndefined();
     expect(normalizeWorldpack({} as never).derivedFrom).toBeUndefined();
   });
+
+  it('slicing deep-clones content so editing the slice cannot mutate the source', () => {
+    const world = normalizeWorldpack({
+      name: 'W', baseMode: 'extend',
+      content: { nodes: [], edges: [], worldItems: { weapons: [{ id: 'w', name: 'Gun', itemType: 'Weapon', weaknesses: ['fire'], effects: [] }] } },
+    } as never);
+    const slice = sliceWorldpack(world, 'items');
+    // Mutate a nested array on the slice — the source pack must be untouched.
+    slice.content!.worldItems.weapons[0].weaknesses!.push('HACKED');
+    expect(world.content!.worldItems.weapons[0].weaknesses).toEqual(['fire']);
+  });
+});
+
+describe('normalizeWorldpack — non-finite timestamps', () => {
+  it('coerces NaN/Infinity createdAt & updatedAt to a finite value', () => {
+    const p = normalizeWorldpack({ createdAt: NaN, updatedAt: Infinity } as never);
+    expect(Number.isFinite(p.createdAt as number)).toBe(true);
+    expect(Number.isFinite(p.updatedAt as number)).toBe(true);
+    expect(Number.isFinite(normalizeWorldpack({ createdAt: -Infinity } as never).createdAt as number)).toBe(true);
+  });
+});
+
+describe('weapon double-damage heal', () => {
+  it('drops useWeaponDamage on a weapon effect that also carries its own dice', () => {
+    const c = normalizeWorldpackContent({
+      worldItems: { weapons: [{ id: 'gun', name: 'Gun', itemType: 'Weapon', effects: [{ id: 'e', type: 'Apply Damage', useWeaponDamage: true, additionalDamage: '2d6' }] }] },
+    } as never);
+    expect(c.worldItems.weapons[0].effects[0].useWeaponDamage).toBe(false);
+    expect(c.worldItems.weapons[0].effects[0].additionalDamage).toBe('2d6'); // dice preserved
+  });
+
+  it('leaves a weapon-scaling ability effect untouched (legitimate on abilities)', () => {
+    const c = normalizeWorldpackContent({
+      nodes: [{ id: 'n', linkedItem: { id: 'a', type: 'Ability', name: 'Power Strike', effects: [{ id: 'e', type: 'Apply Damage', useWeaponDamage: true, additionalDamage: '1d6' }] } }],
+    } as never);
+    expect(c.nodes[0].linkedItem!.effects[0].useWeaponDamage).toBe(true);
+  });
 });

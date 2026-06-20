@@ -173,6 +173,15 @@ function cleanContentItems(v: unknown): WorldItems {
       item.name = STR(src.name, 120) ?? 'Custom Item';
       item.itemType = (STR(src.itemType, 30) as WorldItem['itemType']) ?? 'Accessory';
       item.effects = cleanEffects(src.effects);
+      // A weapon's own Apply-Damage effect must not BOTH scale with weapon damage
+      // AND re-roll its own dice — that double-counts (computeDamage rolls the
+      // weapon's dice once for useWeaponDamage and again for additionalDamage).
+      // Heal it here so legacy/imported custom weapons stop dealing ~2x damage.
+      if (item.itemType === 'Weapon') {
+        item.effects = item.effects.map((e) =>
+          e.type === 'Apply Damage' && e.useWeaponDamage && e.additionalDamage ? { ...e, useWeaponDamage: false } : e,
+        );
+      }
       // Ammo module — coerce to bounded ints so the engine can trust them.
       item.clipSize = INT(src.clipSize, 0, 9999);
       item.ammoPerShot = INT(src.ammoPerShot, 1, 999);
@@ -215,8 +224,8 @@ export function normalizeWorldpack(raw: unknown): Worldpack {
     author: (typeof r.author === 'string' ? r.author.trim() : '').slice(0, 60),
     description: (typeof r.description === 'string' ? r.description : '').slice(0, 600),
     version: typeof r.version === 'string' ? r.version.slice(0, 20) : '1.0.0',
-    createdAt: typeof r.createdAt === 'number' ? r.createdAt : now,
-    updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : now,
+    createdAt: Number.isFinite(r.createdAt as number) ? (r.createdAt as number) : now,
+    updatedAt: Number.isFinite(r.updatedAt as number) ? (r.updatedAt as number) : now,
     reskins: {
       nodes: cleanReskinMap(reskins.nodes),
       items: cleanReskinMap(reskins.items),
@@ -274,10 +283,12 @@ export function packKind(pack: Worldpack): PackKind {
  *  just the item pack out of a larger world. */
 export function sliceWorldpack(pack: Worldpack, slice: 'tree' | 'items'): Worldpack {
   const content = pack.content ?? { nodes: [], edges: [], worldItems: {} };
+  // Deep-clone so editing the slice can't mutate the source pack through shared
+  // nested references (normalize only rebuilds top-level fields).
   const sliced =
     slice === 'tree'
-      ? { nodes: content.nodes, edges: content.edges, worldItems: {} }
-      : { nodes: [], edges: [], worldItems: content.worldItems };
+      ? { nodes: structuredClone(content.nodes), edges: structuredClone(content.edges), worldItems: {} }
+      : { nodes: [], edges: [], worldItems: structuredClone(content.worldItems) };
   return normalizeWorldpack({
     ...pack,
     id: nanoid(10),

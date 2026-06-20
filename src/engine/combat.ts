@@ -1377,10 +1377,15 @@ function resolveUsable(
       (e.type === 'Modify Stat' && ['HP', 'MP', 'SP'].includes(String(e.statToModify))),
   );
 
+  // An AOE still detonates on its zone (hitting live combatants near the primary)
+  // even if the primary target itself is down — only a single-target attack on a
+  // downed target is a no-op.
+  const isAOE = !!(data as { aoe?: string }).aoe && (data as { aoe?: string }).aoe !== 'Single Target';
   if (
     target &&
     ((target.currentHP <= 0 && !target.isUnconscious) || target.isUnconscious) &&
-    !supportive
+    !supportive &&
+    !isAOE
   ) {
     pushLog(log, round, `${source.name} tries to use ${name}, but ${target.name} is down.`, 'muted');
     results.push({ kind: 'info', text: `${target?.name ?? 'Target'} is down`, targetId: target?.id });
@@ -1652,13 +1657,18 @@ export function resolveAction(
       }
       pushLog(log, round, `${source.name} attacks ${target.name} with ${weapon.name}${shots > 1 ? ` (×${shots})` : ''}!`, 'beam');
       const ctx: ApplyContext = { ...ctxBase, data: weapon };
+      // An AOE burst keeps firing into the zone (each shot re-targets every live
+      // combatant); only a single-target burst aborts when its target drops.
+      const weaponAoe = (weapon as { aoe?: string }).aoe;
+      const aoeWeapon = !!weaponAoe && weaponAoe !== 'Single Target';
       for (let s = 0; s < shots; s += 1) {
+        // Check the target-down stop BEFORE spending ammo, so a kill doesn't waste
+        // a round on a shot that never fires.
+        if (!aoeWeapon && ((target.currentHP <= 0 && !target.isUnconscious) || target.isUnconscious)) break;
         if (usesAmmo) {
           if ((source.ammo![weapon.id] ?? 0) < perShot) break; // ran dry mid-burst
           source.ammo![weapon.id] -= perShot;
         }
-        // Stop the burst if the target drops partway through.
-        if ((target.currentHP <= 0 && !target.isUnconscious) || target.isUnconscious) break;
         resolveUsable(ctx, source, target, weapon, { isWeaponAttack: true });
       }
       if (usesAmmo) {

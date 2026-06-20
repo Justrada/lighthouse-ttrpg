@@ -116,12 +116,29 @@ function mergeItemsOverride(base: WorldItems, custom: WorldItems): WorldItems {
   return out;
 }
 
-/** center-0 is assumed to exist everywhere (learned-skill seeding, tier root).
- *  A 'replace' System that omits it gets the base center injected. */
-function ensureCenter(nodes: SkillNode[]): SkillNode[] {
-  if (nodes.some((n) => n.id === 'center-0' || n.isCenter)) return nodes;
+/** The engine's reachability, tier, and learn/unlearn logic key off the literal
+ *  id 'center-0' as the tree root. Guarantee the active catalog has one:
+ *  - a node already id'd 'center-0' → keep as-is;
+ *  - a custom node marked isCenter (but a different id) → remap it AND its edges
+ *    to 'center-0' (otherwise the whole tree is unbuildable / unlearn wipes it /
+ *    skill costs mis-tier);
+ *  - no center at all → inject the base center node. */
+function ensureCenter(nodes: SkillNode[], edges: SkillEdge[]): { nodes: SkillNode[]; edges: SkillEdge[] } {
+  if (nodes.some((n) => n.id === 'center-0')) return { nodes, edges };
+  const custom = nodes.find((n) => n.isCenter);
+  if (custom) {
+    const oldId = custom.id;
+    return {
+      nodes: nodes.map((n) => (n.id === oldId ? { ...n, id: 'center-0', isCenter: true } : n)),
+      edges: edges.map((e) => ({
+        ...e,
+        sourceId: e.sourceId === oldId ? 'center-0' : e.sourceId,
+        targetId: e.targetId === oldId ? 'center-0' : e.targetId,
+      })),
+    };
+  }
   const center = skillNodes.find((n) => n.id === 'center-0');
-  return center ? [center, ...nodes] : nodes;
+  return { nodes: center ? [center, ...nodes] : nodes, edges };
 }
 
 /** Build an active catalog from a System's content + base mode. Pure. */
@@ -131,7 +148,8 @@ export function buildActiveCatalog(
 ): ActiveCatalog {
   if (!content || mode === 'overlay') return baseCatalog;
   if (mode === 'replace') {
-    return buildCatalog(ensureCenter(content.nodes ?? []), content.edges ?? [], content.worldItems ?? {});
+    const rooted = ensureCenter(content.nodes ?? [], content.edges ?? []);
+    return buildCatalog(rooted.nodes, rooted.edges, content.worldItems ?? {});
   }
   // extend: base ∪ custom, custom wins on id collisions.
   return buildCatalog(

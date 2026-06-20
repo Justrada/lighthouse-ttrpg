@@ -15,10 +15,22 @@ function loadActive(): string | null {
   return loadJSON<string | null>(KEYS.activeWorldpack, null);
 }
 
+// While a player is in a multiplayer session, the GM's synced System is
+// authoritative. We suppress LOCAL catalog application so a player who activates
+// or edits a local pack mid-session can't clobber the GM-synced catalog (which
+// would desync their combat resolution). Their activeId still updates and is
+// restored on leave via ensureActiveCatalog. Set by sessionStore (players only).
+let _sessionLocked = false;
+export function setWorldpackSessionLock(v: boolean): void {
+  _sessionLocked = v;
+}
+
 /** Push the active pack's custom content into the resolver registry (base when
  *  there's no active pack or it's overlay-only). Keeps findNode/findItem and the
- *  Forge/combat in sync with the activated System. */
+ *  Forge/combat in sync with the activated System. No-op while a player session
+ *  holds the lock (the GM's synced catalog stays authoritative). */
 function applyCatalog(packs: Worldpack[], activeId: string | null): void {
+  if (_sessionLocked) return;
   const pack = packs.find((p) => p.id === activeId) ?? null;
   setActiveCatalog(pack ? buildActiveCatalog(pack.content, pack.baseMode ?? 'overlay') : null);
 }
