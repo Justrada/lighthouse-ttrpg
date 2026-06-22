@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { nanoid } from 'nanoid';
-import { Plus, Trash2, Swords, Wand2, Sparkles, RotateCw } from 'lucide-react';
+import { Plus, Trash2, Swords, Wand2, Sparkles, RotateCw, GitBranch } from 'lucide-react';
 import { Input, Textarea, Select, NumberStepper, SegmentedControl, Button, Badge, Divider } from '@/components/ui';
 import type { Worldpack, WorldpackContent, SkillNode, SkillEffect, WorldItem, SystemBaseMode } from '@/types';
 import { parseDiceNotation } from '@/engine/dice';
 import { cn } from '@/lib/cn';
 import { TreeEditor } from './TreeEditor';
+import { placeChild } from './treeLayout';
 
 /** Validate a dice/amount string the way the engine reads it, with a human preview.
  *  Accepts dice (2d6, 1d8+1, -1d6) and flat signed integers (+5, 3, -2). */
@@ -125,28 +126,25 @@ export function ContentSection({ draft, setDraft }: Props) {
   // Flip an overlay (reskin-only) pack to 'extend' the moment real content is
   // added — otherwise the content the creator just authored silently won't apply.
   const appliesMode = (d: Worldpack): SystemBaseMode => ((d.baseMode ?? 'overlay') === 'overlay' ? 'extend' : (d.baseMode as SystemBaseMode));
-  const addAbility = () => {
+  // Add an ability as a CHILD of `parentId` (its prerequisite, default the Core).
+  // The child is placed one tier further from Core and auto-linked from the
+  // parent, so building a hierarchy is just "tap a node → +", not manual linking.
+  const addAbility = (parentId: string = 'center-0') => {
     const base = newAbilityNode();
     setDraft((d) => {
       const c = d.content ?? EMPTY;
       const i = c.nodes.length;
-      // Spread new nodes across the editor canvas instead of stacking at 0,0, and
-      // auto-number the name so nodes aren't indistinguishable "New Ability"s.
+      // Auto-number the name so nodes aren't indistinguishable "New Ability"s.
       const label = `New Ability ${i + 1}`;
-      const node = {
-        ...base,
-        x: 180 + (i % 4) * 130,
-        y: 70 + Math.floor(i / 4) * 90,
-        label,
-        linkedItem: { ...base.linkedItem!, name: label },
-      };
+      const { x, y } = placeChild(c, parentId);
+      const node = { ...base, x, y, label, linkedItem: { ...base.linkedItem!, name: label } };
       return {
         ...d,
         baseMode: appliesMode(d),
         content: {
           ...c,
           nodes: [...c.nodes, node],
-          edges: [...c.edges, { id: `ed_${nanoid(6)}`, sourceId: 'center-0', targetId: node.id }],
+          edges: [...c.edges, { id: `ed_${nanoid(6)}`, sourceId: parentId, targetId: node.id }],
         },
       };
     });
@@ -214,13 +212,14 @@ export function ContentSection({ draft, setDraft }: Props) {
           // Map + the selected skill's editor side-by-side on wide screens (stacked
           // on narrow), so you can see the tree and shape a skill at the same time.
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] lg:items-start">
-            <TreeEditor content={content} mutate={mutate} selectedId={selectedId} onSelect={setSelectedId} onAdd={addAbility} />
+            <TreeEditor content={content} mutate={mutate} selectedId={selectedId} onSelect={setSelectedId} onAddChild={addAbility} />
             <div className="lg:sticky lg:top-20 lg:max-h-[80vh] lg:overflow-auto">
               {selected ? (
                 <AbilityEditor
                   key={selected.id}
                   node={selected}
                   onChange={(n) => updateAbility(selected.id, n)}
+                  onAddChild={() => addAbility(selected.id)}
                   onRemove={() => {
                     removeAbility(selected.id);
                     setSelectedId(null);
@@ -236,7 +235,7 @@ export function ContentSection({ draft, setDraft }: Props) {
         ) : (
           <>
             <div className="flex justify-end">
-              <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={addAbility}>
+              <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => addAbility()}>
                 New ability
               </Button>
             </div>
@@ -246,7 +245,13 @@ export function ContentSection({ draft, setDraft }: Props) {
               </p>
             ) : (
               abilities.map((node) => (
-                <AbilityEditor key={node.id} node={node} onChange={(n) => updateAbility(node.id, n)} onRemove={() => removeAbility(node.id)} />
+                <AbilityEditor
+                  key={node.id}
+                  node={node}
+                  onChange={(n) => updateAbility(node.id, n)}
+                  onAddChild={() => addAbility(node.id)}
+                  onRemove={() => removeAbility(node.id)}
+                />
               ))
             )}
           </>
@@ -290,7 +295,18 @@ function Labeled({ label, children, className }: { label: string; children: Reac
   );
 }
 
-function AbilityEditor({ node, onChange, onRemove }: { node: SkillNode; onChange: (n: SkillNode) => void; onRemove: () => void }) {
+function AbilityEditor({
+  node,
+  onChange,
+  onRemove,
+  onAddChild,
+}: {
+  node: SkillNode;
+  onChange: (n: SkillNode) => void;
+  onRemove: () => void;
+  /** Add a new ability that requires THIS one as its prerequisite (a tier deeper). */
+  onAddChild?: () => void;
+}) {
   const li = node.linkedItem!;
   const effect = li.effects[0] ?? { id: `e_${nanoid(6)}`, type: 'Apply Damage' };
 
@@ -303,6 +319,11 @@ function AbilityEditor({ node, onChange, onRemove }: { node: SkillNode; onChange
       <div className="mb-2 flex items-center gap-2">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-arcane-soft" />
         <Input value={li.name} placeholder="Ability name" maxLength={120} onChange={(e) => setName(e.target.value)} />
+        {onAddChild && (
+          <Button variant="ghost" size="sm" aria-label="Add child skill" title="Add a skill that needs this one first" onClick={onAddChild}>
+            <GitBranch className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <Button variant="ghost" size="sm" aria-label="Remove ability" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>

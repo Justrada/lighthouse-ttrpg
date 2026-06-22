@@ -4,54 +4,39 @@ import { Link2, Plus, Hand, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui';
 import type { WorldpackContent, SkillNode } from '@/types';
 import { cn } from '@/lib/cn';
+import { CENTER, clamp, canvasSize, depthFromCenter } from './treeLayout';
 
 /**
  * A lightweight visual editor for a custom skill tree: drag nodes to arrange
- * them, and (in Link mode) tap a prerequisite then the skill it unlocks to draw a
- * directional link. Edits ONLY custom content — the base `center-0` shows as a
- * fixed anchor so creators wire prerequisites back to the root. Deliberately
- * separate from the read-only play-time SkillTreeGraph so editing can't regress play.
+ * them, add a child straight off any node (the "+" affordance), and — in Link
+ * mode — tap a prerequisite then the skill it unlocks to draw a directional
+ * link. Children land one column further from Core, so a node's distance from
+ * Core reads as its tier (what the engine charges points for). Edits ONLY custom
+ * content — the base `center-0` shows as a fixed anchor so creators wire
+ * prerequisites back to the root. Deliberately separate from the read-only
+ * play-time SkillTreeGraph so editing can't regress play.
  */
-
-const W = 640;
-const H = 360;
-const CENTER = { x: 48, y: H / 2 };
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-/** Set of node ids reachable from center-0 via prerequisite edges (a node not in
- *  it is unlearnable in play — a dead skill nobody can take). */
-function reachableFromCenter(content: WorldpackContent): Set<string> {
-  const adj = new Map<string, string[]>();
-  for (const e of content.edges) {
-    const list = adj.get(e.sourceId);
-    if (list) list.push(e.targetId);
-    else adj.set(e.sourceId, [e.targetId]);
-  }
-  const seen = new Set<string>(['center-0']);
-  const q = ['center-0'];
-  while (q.length) {
-    const cur = q.shift()!;
-    for (const t of adj.get(cur) ?? []) if (!seen.has(t)) { seen.add(t); q.push(t); }
-  }
-  return seen;
-}
 
 interface Props {
   content: WorldpackContent;
   mutate: (fn: (c: WorldpackContent) => WorldpackContent) => void;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onAdd: () => void;
+  /** Create a new ability as a child of `parentId` (its prerequisite). */
+  onAddChild: (parentId: string) => void;
 }
 
-export function TreeEditor({ content, mutate, selectedId, onSelect, onAdd }: Props) {
+export function TreeEditor({ content, mutate, selectedId, onSelect, onAddChild }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: string; offX: number; offY: number; moved: boolean } | null>(null);
   const [linking, setLinking] = useState(false);
   const [linkSource, setLinkSource] = useState<string | null>(null);
 
-  const reachable = reachableFromCenter(content);
+  // Reachable-from-Core set (== keys of the BFS depth map). A node not in it is
+  // unlearnable in play — a dead skill nobody can take.
+  const reachable = new Set(depthFromCenter(content).keys());
   const unreachable = content.nodes.filter((n) => !reachable.has(n.id));
+  const { width: W, height: H } = canvasSize(content);
 
   const posOf = (id: string): { x: number; y: number } | null => {
     if (id === 'center-0') return CENTER;
@@ -132,10 +117,30 @@ export function TreeEditor({ content, mutate, selectedId, onSelect, onAdd }: Pro
       return { id: e.id, x1: a.x, y1: a.y, x2: b.x - (dx / len) * gap, y2: b.y - (dy / len) * gap };
     });
 
+  // A small "+" that spawns a child of the given node, shown on Core (always) and
+  // on the selected node. Rendered as its own button (buttons can't nest) offset
+  // toward where the child will appear — up and to the right.
+  const AddChild = ({ x, y, parentId, title }: { x: number; y: number; parentId: string; title: string }) =>
+    linking ? null : (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddChild(parentId);
+        }}
+        className="absolute z-10 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-arcane/60 bg-arcane/30 text-arcane-soft shadow-sm transition hover:bg-arcane/50 tap-highlight-none"
+        style={{ left: x + 22, top: y - 16 }}
+        title={title}
+        aria-label={title}
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+    );
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={onAdd}>
+        <Button variant="secondary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => onAddChild('center-0')}>
           New ability
         </Button>
         <Button
@@ -154,7 +159,7 @@ export function TreeEditor({ content, mutate, selectedId, onSelect, onAdd }: Pro
             ? linkSource
               ? 'Now tap the skill it unlocks (tap the same node to cancel).'
               : 'Tap the prerequisite first, then the skill it unlocks.'
-            : 'Drag to arrange · tap to edit · arrows point to what a skill unlocks.'}
+            : 'Tap a node, then its “+” to branch a child · drag to arrange · columns = tiers.'}
         </span>
       </div>
 
@@ -233,9 +238,23 @@ export function TreeEditor({ content, mutate, selectedId, onSelect, onAdd }: Pro
             );
           })}
 
+          {/* "+" affordances: always on Core, and on the currently-selected node. */}
+          <AddChild x={CENTER.x} y={CENTER.y} parentId="center-0" title="Add a skill branching from Core" />
+          {content.nodes.map((n) =>
+            selectedId === n.id ? (
+              <AddChild
+                key={`add-${n.id}`}
+                x={n.x}
+                y={n.y}
+                parentId={n.id}
+                title={`Add a child skill of “${n.linkedItem?.name || n.label || 'this'}”`}
+              />
+            ) : null,
+          )}
+
           {content.nodes.length === 0 && (
             <div className="absolute inset-0 grid place-items-center px-6 text-center text-xs text-ink-faint">
-              Add a skill, then drag it into place and link it back to Core so players can learn it.
+              Tap the “+” on Core to add your first skill, then keep branching children outward.
             </div>
           )}
         </div>
