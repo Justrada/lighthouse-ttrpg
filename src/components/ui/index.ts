@@ -66,21 +66,12 @@ export type { NumberStepperProps } from './NumberStepper';
 export { Switch } from './Switch';
 export type { SwitchProps } from './Switch';
 
-export { Slider } from './Slider';
-export type { SliderProps } from './Slider';
-
 export { SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentOption } from './SegmentedControl';
 
 // Display
 export { Badge } from './Badge';
 export type { BadgeProps, BadgeTone, BadgeVariant } from './Badge';
-
-export { Chip } from './Chip';
-export type { ChipProps } from './Chip';
-
-export { Tag } from './Tag';
-export type { TagProps } from './Tag';
 
 export { ConditionBadge } from './ConditionBadge';
 export type { ConditionBadgeProps, ConditionTone } from './ConditionBadge';
@@ -99,9 +90,6 @@ export type { EmptyStateProps } from './EmptyState';
 
 export { Divider } from './Divider';
 export type { DividerProps } from './Divider';
-
-export { Kbd } from './Kbd';
-export type { KbdProps } from './Kbd';
 
 export { ProgressRing } from './ProgressRing';
 export type { ProgressRingProps } from './ProgressRing';

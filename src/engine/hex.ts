@@ -13,8 +13,6 @@ export interface GridDims {
 
 export const hexKey = (c: HexCoord): string => `${c.q},${c.r}`;
 export const hexEquals = (a: HexCoord, b: HexCoord): boolean => a.q === b.q && a.r === b.r;
-export const hexAdd = (a: HexCoord, b: HexCoord): HexCoord => ({ q: a.q + b.q, r: a.r + b.r });
-export const hexSub = (a: HexCoord, b: HexCoord): HexCoord => ({ q: a.q - b.q, r: a.r - b.r });
 
 /** The six axial neighbor directions (pointy-top). */
 export const HEX_DIRECTIONS: readonly HexCoord[] = [

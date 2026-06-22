@@ -49,8 +49,6 @@ export {
 export {
   createStatusEffect,
   tickDurations,
-  applyStatModString,
-  rollAmount,
   nextEffectId,
   type RuntimeEffect,
 } from './effects';
@@ -59,8 +57,6 @@ export {
 export {
   hexKey,
   hexEquals,
-  hexAdd,
-  hexSub,
   hexNeighbors,
   hexDistance,
   hexesInRange,

@@ -30,11 +30,3 @@ export function saveJSON(key: string, value: unknown): void {
     /* quota or serialization failure — non-fatal */
   }
 }
-
-export function removeKey(key: string): void {
-  try {
-    localStorage.removeItem(PREFIX + key);
-  } catch {
-    /* ignore */
-  }
-}

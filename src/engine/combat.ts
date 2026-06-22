@@ -13,7 +13,7 @@ import type {
   Team,
   WorldItem,
 } from '@/types';
-import { BATTLE_GRID, MOVE_RANGE, RANGE_ORDER, RANGE_TO_HEX_DISTANCE } from '@/data/constants';
+import { BATTLE_GRID, MOVE_RANGE, RANGE_TO_HEX_DISTANCE } from '@/data/constants';
 import { findItem, findNode } from '@/data/skillTree';
 import { calculateDerivedStats } from './stats';
 import {
@@ -1865,5 +1865,3 @@ export function resolveRound(
 
   return { steps, state: current };
 }
-
-export { RANGE_ORDER };

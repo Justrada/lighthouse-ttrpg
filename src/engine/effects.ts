@@ -1,5 +1,4 @@
 import type { ActiveStatusEffect, Combatant, SkillEffect, Team } from '@/types';
-import { roll, type Rng } from './dice';
 
 /**
  * The runtime shape of an effect living on a combatant during combat.
@@ -152,23 +151,4 @@ export function tickDurations(combatant: Combatant): ActiveStatusEffect[] {
   }
 
   return next;
-}
-
-/**
- * Apply a stat-modification string ("+5", "-2", or even "+1d10") to a base
- * number. Pure dice strings are rolled with the provided rng. Used for healing
- * and ad-hoc stat tweaks where the modification may include dice.
- */
-export function applyStatModString(base: number, mod: string, rng: Rng = Math.random): number {
-  return base + roll(mod, rng).total;
-}
-
-/**
- * Parse a damage/heal string into a numeric amount. Equivalent to the original
- * `rollDice` total: dice are rolled, constants pass through, and negative
- * notation negates. Callers decide how to clamp.
- */
-export function rollAmount(notation: string | undefined, rng: Rng = Math.random): number {
-  if (!notation) return 0;
-  return roll(notation, rng).total;
 }
