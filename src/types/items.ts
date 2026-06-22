@@ -9,6 +9,9 @@ export interface WorldItem {
   description: string;
   itemType: ItemCategory;
   weaknesses?: string[];
+  /** Damage types this item grants its wearer resistance (half) / immunity (none) to. */
+  resist?: string[];
+  immune?: string[];
   /** Weapon damage dice notation, when present. */
   damage?: string;
   damageType?: string;

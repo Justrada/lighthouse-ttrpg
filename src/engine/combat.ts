@@ -20,6 +20,7 @@ import {
   combineAdvantage,
   rollD20,
   roll,
+  parseDiceNotation,
   type Rng,
 } from './dice';
 import {
@@ -34,6 +35,7 @@ import {
   hexEquals,
   hexLineDraw,
   inBounds,
+  reachableHexes,
   stepAway,
   stepToward,
 } from './hex';
@@ -101,6 +103,8 @@ function cloneCombatant(c: Combatant): Combatant {
     consumables: c.consumables ? { ...c.consumables } : c.consumables,
     ammo: c.ammo ? { ...c.ammo } : c.ammo,
     ammoReserve: c.ammoReserve ? { ...c.ammoReserve } : c.ammoReserve,
+    resist: c.resist ? [...c.resist] : c.resist,
+    immune: c.immune ? [...c.immune] : c.immune,
     lastActionResult: c.lastActionResult ? { ...c.lastActionResult } : c.lastActionResult,
   };
 }
@@ -186,11 +190,69 @@ export function actionSlotsFor(
   return Math.max(1, base + bonus);
 }
 
+/** Crit profile from learned Enhancements + equipped items: a `Crit Threshold`
+ *  Modify-Stat lowers the threshold (e.g. -1 → crit on 19); a `Crit Mode`/`Crit
+ *  Damage` of "Max" maximizes the dice on a crit instead of doubling them. */
+function deriveCritProfile(
+  character: Character,
+): { critThreshold: number; critMode: 'double-dice' | 'max-dice' } {
+  let threshold = 20;
+  let mode: 'double-dice' | 'max-dice' = 'double-dice';
+  const consider = (effects?: SkillEffect[]) => {
+    for (const e of effects ?? []) {
+      if (e.type !== 'Modify Stat') continue;
+      const stat = String(e.statToModify ?? '').toUpperCase();
+      if (stat === 'CRIT THRESHOLD' || stat === 'CRIT RANGE') {
+        const v = parseInt(String(e.modification), 10);
+        if (!Number.isNaN(v)) threshold += v;
+      } else if (stat === 'CRIT MODE' || stat === 'CRIT DAMAGE') {
+        if (String(e.modification ?? '').toUpperCase().includes('MAX')) mode = 'max-dice';
+      }
+    }
+  };
+  for (const id of character.learnedSkills ?? []) {
+    const li = findNode(id)?.linkedItem;
+    if (li?.type === 'Enhancement') consider(li.effects);
+  }
+  const inv = character.inventory;
+  if (inv) {
+    for (const id of [inv.armor, inv.weapon, inv.shield, ...(inv.accessories ?? [])]) {
+      if (id) consider(findItem(id)?.effects);
+    }
+  }
+  return { critThreshold: Math.max(12, Math.min(20, threshold)), critMode: mode };
+}
+
+/** Damage types a character resists (half) or is immune to (none), from innate
+ *  fields plus equipped items. Immunity supersedes resistance for the same type. */
+function deriveResistances(character: Character): { resist: string[]; immune: string[] } {
+  const resist = new Set<string>();
+  const immune = new Set<string>();
+  const add = (r?: string[], i?: string[]) => {
+    for (const t of r ?? []) if (t) resist.add(t);
+    for (const t of i ?? []) if (t) immune.add(t);
+  };
+  add(character.resist, character.immune);
+  const inv = character.inventory;
+  if (inv) {
+    for (const id of [inv.armor, inv.weapon, inv.shield, ...(inv.accessories ?? [])]) {
+      if (id) {
+        const it = findItem(id);
+        add(it?.resist, it?.immune);
+      }
+    }
+  }
+  for (const t of immune) resist.delete(t);
+  return { resist: [...resist], immune: [...immune] };
+}
+
 export function createCombatant(
   character: Character,
   opts: CreateCombatantOptions,
 ): Combatant {
   const derived = calculateDerivedStats(character);
+  const crit = deriveCritProfile(character);
+  const resistances = deriveResistances(character);
   const position = opts.position ?? { q: 0, r: 0 };
 
   const currentHP = opts.currentHP ?? character.currentHP ?? derived.hp;
@@ -240,6 +302,10 @@ export function createCombatant(
     currentMP,
     currentSP,
     ac: derived.ac,
+    resist: resistances.resist,
+    immune: resistances.immune,
+    critThreshold: crit.critThreshold,
+    critMode: crit.critMode,
     portraitSeed: character.portraitSeed,
     statusEffects: [],
     isUnconscious: currentHP === 0,
@@ -858,6 +924,29 @@ interface RolledCache {
   stats: Record<string, number>;
 }
 
+/**
+ * Roll a damage notation, applying the crit rule when `crit` is set:
+ *  - 'double-dice' (default): roll the dice and count them twice; the flat
+ *    modifier is added once (2d6+3 crits to "2d6 doubled + 3", not (2d6+3)×2).
+ *  - 'max-dice': every die lands on its maximum face (+ the flat modifier once).
+ * A bare constant (no dice) is returned unchanged — a crit doubles dice, not flats.
+ */
+export function rollDamageNotation(
+  notation: string,
+  rng: Rng,
+  crit: boolean,
+  mode: 'double-dice' | 'max-dice',
+): number {
+  const p = parseDiceNotation(notation);
+  if (!p) return roll(notation, rng).total;
+  const sign = p.negative ? -1 : 1;
+  if (crit && mode === 'max-dice') return sign * (p.count * p.sides + p.modifier);
+  const r = roll(notation, rng);
+  if (!crit) return r.total;
+  const diceSum = r.rolls.reduce((a, b) => a + b, 0);
+  return sign * (diceSum * 2 + p.modifier);
+}
+
 /** Compute the base damage for an Apply Damage effect (weapon + additional). */
 function computeDamage(
   effect: SkillEffect,
@@ -866,6 +955,7 @@ function computeDamage(
   isCrit: boolean,
   rng: Rng,
 ): number {
+  const critMode = source.critMode ?? 'double-dice';
   let weaponDamage = 0;
   if (effect.useWeaponDamage) {
     // A mid-combat equipment swap (source.equippedWeaponId) overrides the source
@@ -873,17 +963,27 @@ function computeDamage(
     const weaponId = source.equippedWeaponId ?? sourceChar?.inventory?.weapon;
     const weapon = weaponId ? findItem(weaponId) : undefined;
     const weaponEffect = weapon?.effects?.find((e) => e.type === 'Apply Damage');
+    const mult = effect.weaponMultiplier ?? 1;
     if (weaponEffect?.additionalDamage) {
-      weaponDamage = roll(weaponEffect.additionalDamage, rng).total * (effect.weaponMultiplier ?? 1);
+      weaponDamage = rollDamageNotation(weaponEffect.additionalDamage, rng, isCrit, critMode) * mult;
     }
     if (weaponDamage === 0) {
-      weaponDamage = roll('1d4', rng).total * (effect.weaponMultiplier ?? 1);
+      weaponDamage = rollDamageNotation('1d4', rng, isCrit, critMode) * mult;
     }
   }
-  const additional = effect.additionalDamage ? roll(effect.additionalDamage, rng).total : 0;
-  let total = weaponDamage + additional;
-  if (isCrit) total *= 2;
-  return total;
+  const additional = effect.additionalDamage
+    ? rollDamageNotation(effect.additionalDamage, rng, isCrit, critMode)
+    : 0;
+  return weaponDamage + additional;
+}
+
+/** Reduce damage by the target's resistance (half) or immunity (none) to its type. */
+export function applyResistance(target: Combatant, damage: number, damageType: string | undefined): number {
+  if (!damageType || damage <= 0) return damage;
+  const t = damageType.toLowerCase();
+  if ((target.immune ?? []).some((x) => String(x).toLowerCase() === t)) return 0;
+  if ((target.resist ?? []).some((x) => String(x).toLowerCase() === t)) return Math.floor(damage / 2);
+  return damage;
 }
 
 interface ApplyContext {
@@ -917,6 +1017,9 @@ function applyEffect(
       }
       let damage = cache.damage[dkey];
       if (effect.isHalved) damage = Math.floor(damage / 2);
+      // Per-target: resist (half) or immune (none) to this damage type. Applied
+      // after the shared roll so each target mitigates independently.
+      damage = applyResistance(target, damage, effect.damageType);
 
       // Damage-over-time: attach as a duration effect rather than apply now.
       if (effect.durationValue && (effect.durationUnit || effect.durationType)) {
@@ -1166,6 +1269,7 @@ function processSavingThrows(
   log: CombatLogEntry[],
   rng: Rng,
   character?: Character,
+  defaultDC = 8,
 ): Array<SkillEffect & { isHalved?: boolean }> {
   const groups = new Map<string, SkillEffect[]>();
   const noSave: SkillEffect[] = [];
@@ -1182,13 +1286,19 @@ function processSavingThrows(
 
   const final: Array<SkillEffect & { isHalved?: boolean }> = [...noSave];
 
+  // DC = the authored saveDC when present and positive, else 8 + caster skill.
+  const dcOf = (e: SkillEffect): number => {
+    const explicit = Number(e.saveDC);
+    return Number.isFinite(explicit) && explicit > 0 ? explicit : defaultDC;
+  };
+
   for (const [skill, groupEffects] of groups) {
-    const highestDC = Math.max(...groupEffects.map((e) => Number(e.saveDC) || 0));
+    const highestDC = Math.max(...groupEffects.map(dcOf));
     const save = rollSavingThrow(target, skill, highestDC, rng, character);
     pushLog(log, round, `${target.name} rolls ${skill} save: ${save.total}.`, 'muted');
 
     for (const effect of groupEffects) {
-      const dc = Number(effect.saveDC) || 0;
+      const dc = dcOf(effect);
       const success = save.crit === 'success' || (save.crit !== 'fail' && save.total >= dc);
       if (success) {
         if (effect.saveOutcome === 'Halve') {
@@ -1212,40 +1322,55 @@ function processSavingThrows(
 // ---------------------------------------------------------------------------
 
 /**
- * Roll initiative for every declared action and return them sorted descending.
- * Each declared action rolls a d20 + the source's effective initiative bonus,
- * faithful to the original per-action initiative model. Stable for equal totals
- * by declaration order.
+ * Roll simultaneous, per-action initiative for the round.
+ *
+ * Each combatant rolls one d20 + initiative per action, and those rolls are
+ * assigned to their actions in DECLARED order, highest first — so a combatant's
+ * 1st action reliably resolves before its own later actions. All actions then
+ * interleave into one timeline by descending initiative. Ties BETWEEN different
+ * combatants are broken by a per-combatant reroll (the higher reroll goes first);
+ * a combatant's own internal ties keep declared order. This is the game's
+ * signature "everyone acts at once, slotted together" model.
  */
 export function rollInitiativeForRound(
   state: CombatState,
   rng: Rng = Math.random,
   charLookup?: (c: Combatant) => Character | undefined,
 ): ResolvedAction[] {
-  const queue: ResolvedAction[] = [];
+  const order = new Map<string, number>(); // stable per-combatant fallback
+  const reroll = new Map<string, number>(); // cross-combatant tie-breaker
+  const entries: { a: ResolvedAction; own: number }[] = [];
 
-  for (const combatant of state.combatants) {
-    const actions =
-      state.declaredActions[combatant.peerId ?? ''] ?? state.declaredActions[combatant.id] ?? [];
-    if (actions.length === 0) continue;
+  state.combatants.forEach((combatant, idx) => {
+    // declaredActions is keyed by combatant id everywhere (peerId is only
+    // ownership metadata the engine never keys on); look it up by id alone so a
+    // peerId↔id collision can't hijack or fabricate another combatant's actions.
+    const actions = state.declaredActions[combatant.id] ?? [];
+    if (actions.length === 0) return;
+    order.set(combatant.id, idx);
 
     const bonus = effectiveStats(combatant, charLookup?.(combatant)).initiative;
+    // One roll per action, highest assigned to the earliest-declared action.
+    const rolls = actions.map(() => rollD20('normal', bonus, rng).total).sort((a, b) => b - a);
+    reroll.set(combatant.id, rollD20('normal', 0, rng).total);
 
-    for (const action of actions) {
-      const initiative = rollD20('normal', bonus, rng).total;
-      queue.push({
-        ...action,
-        sourceId: combatant.id,
-        sourceTeam: combatant.team,
-        initiative,
+    actions.forEach((action, i) => {
+      entries.push({
+        a: { ...action, sourceId: combatant.id, sourceTeam: combatant.team, initiative: rolls[i] },
+        own: i,
       });
-    }
-  }
+    });
+  });
 
-  return queue
-    .map((a, i) => ({ a, i }))
-    .sort((x, y) => y.a.initiative - x.a.initiative || x.i - y.i)
-    .map(({ a }) => a);
+  return entries
+    .sort(
+      (x, y) =>
+        y.a.initiative - x.a.initiative ||
+        (reroll.get(y.a.sourceId) ?? 0) - (reroll.get(x.a.sourceId) ?? 0) ||
+        (order.get(x.a.sourceId) ?? 0) - (order.get(y.a.sourceId) ?? 0) ||
+        x.own - y.own,
+    )
+    .map((e) => e.a);
 }
 
 // ---------------------------------------------------------------------------
@@ -1319,7 +1444,7 @@ function resolveMove(
   results.push({ kind: 'move', text: `${source.name} moves`, targetId: source.id });
 }
 
-/** Resolve a Flee action: step away from the target up to {@link MOVE_RANGE} hexes. */
+/** Resolve a Flee action: move to the reachable open hex FURTHEST from the target. */
 function resolveFlee(
   state: CombatState,
   source: Combatant,
@@ -1335,27 +1460,60 @@ function resolveFlee(
   }
 
   const blocked = blockedBy(state, source);
-  // Aim at a hex far on the opposite side of the target, then take as many steps
-  // toward it as the move allowance permits.
-  const dir = {
-    q: source.position.q - target.position.q,
-    r: source.position.r - target.position.r,
-  };
-  const farGoal =
-    dir.q === 0 && dir.r === 0
-      ? { q: source.position.q + MOVE_RANGE, r: source.position.r }
-      : { q: source.position.q + dir.q * MOVE_RANGE, r: source.position.r + dir.r * MOVE_RANGE };
-  const dest = closestReachableTo(source.position, farGoal, MOVE_RANGE, blocked, BATTLE_GRID);
+  // Pick the reachable open hex that maximizes distance from the target — the
+  // nearest safe spot the move allowance can reach, even if it means sidestepping.
+  let best = source.position;
+  let bestD = hexDistance(source.position, target.position);
+  for (const c of reachableHexes(source.position, MOVE_RANGE, blocked, BATTLE_GRID)) {
+    const d = hexDistance(c, target.position);
+    if (d > bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
 
-  if (hexEquals(dest, source.position)) {
+  if (hexEquals(best, source.position)) {
     pushLog(log, round, `${source.name} tries to flee but is cornered.`, 'muted');
     results.push({ kind: 'info', text: `${source.name} is cornered`, targetId: source.id });
     return;
   }
 
-  source.position = dest;
+  source.position = best;
   pushLog(log, round, `${source.name} flees from ${target.name}.`, 'beam');
   results.push({ kind: 'move', text: `${source.name} flees`, targetId: source.id });
+}
+
+/** Resolve a Chase action: close to the reachable open hex NEAREST the target,
+ *  stopping adjacent rather than landing on it. */
+function resolveChase(
+  state: CombatState,
+  source: Combatant,
+  target: Combatant | undefined,
+  round: number,
+  log: CombatLogEntry[],
+  results: ActionResult[],
+): void {
+  if (!target) {
+    pushLog(log, round, `${source.name} tries to chase but has no target.`, 'muted');
+    results.push({ kind: 'info', text: `${source.name} cannot chase`, targetId: source.id });
+    return;
+  }
+
+  const blocked = blockedBy(state, source);
+  const dest = closestReachableTo(source.position, target.position, MOVE_RANGE, blocked, BATTLE_GRID);
+  // Don't end on top of the target — fall back to holding if the only closer hex
+  // is the target's own.
+  const finalDest = hexEquals(dest, target.position) ? source.position : dest;
+
+  if (hexEquals(finalDest, source.position)) {
+    pushLog(log, round, `${source.name} can't get any closer to ${target.name}.`, 'muted');
+    results.push({ kind: 'info', text: `${source.name} is blocked`, targetId: source.id });
+    return;
+  }
+
+  source.position = finalDest;
+  pushLog(log, round, `${source.name} chases ${target.name}.`, 'beam');
+  results.push({ kind: 'move', text: `${source.name} chases`, targetId: source.id });
 }
 
 /** Resolve a Guard action (defensive stance giving attackers disadvantage). */
@@ -1392,6 +1550,9 @@ function resolveUsable(
 ): void {
   const { state, round, log, results, rng } = ctx;
   const name = data.name ?? 'an ability';
+  // Saving-throw DC for this usable's effects when they don't author an explicit
+  // DC: 8 + the caster's skill in the usable's attack skill (so casters scale).
+  const casterSaveDC = 8 + skillScore(source, data.rollModifier, ctx.sourceChar);
 
   const supportive = (data.effects ?? []).some(
     (e) =>
@@ -1453,7 +1614,7 @@ function resolveUsable(
     pushLog(log, round, `${source.name} uses ${name}${allTargets.length > 1 ? ` affecting ${allTargets.length} targets` : ` on ${target!.name}`}.`, 'arcane');
     for (const t of allTargets) {
       t.lastActionResult = { kind: 'effect', text: '' };
-      const effs = processSavingThrows(t, data.effects ?? [], round, log, rng, ctx.charLookup?.(t));
+      const effs = processSavingThrows(t, data.effects ?? [], round, log, rng, ctx.charLookup?.(t), casterSaveDC);
       for (const eff of effs) applyEffect(ctx, t, eff, cache);
     }
     return;
@@ -1474,7 +1635,7 @@ function resolveUsable(
     target!.isGuarding = false;
   }
 
-  const attack = rollD20(mode, score, rng);
+  const attack = rollD20(mode, score, rng, source.critThreshold ?? 20);
   const isCrit = attack.crit === 'success';
   const isCritFail = attack.crit === 'fail';
   ctx.isCrit = isCrit;
@@ -1500,7 +1661,7 @@ function resolveUsable(
   }
 
   for (const t of hitTargets) {
-    const effs = processSavingThrows(t, data.effects ?? [], round, log, rng, ctx.charLookup?.(t));
+    const effs = processSavingThrows(t, data.effects ?? [], round, log, rng, ctx.charLookup?.(t), casterSaveDC);
     for (const eff of effs) applyEffect(ctx, t, eff, cache);
   }
 }
@@ -1599,6 +1760,10 @@ export function resolveAction(
       resolveFlee(next, source, target, round, log, results);
       break;
 
+    case 'Chase':
+      resolveChase(next, source, target, round, log, results);
+      break;
+
     case 'Change Equipment': {
       source.equippedWeaponId = action.actionId ?? null;
       const weapon = action.actionId ? findItem(action.actionId) : undefined;
@@ -1637,7 +1802,8 @@ export function resolveAction(
       pushLog(log, round, `${source.name} uses ${item.name} on ${target.name}.`, 'arcane');
       const cache: RolledCache = { stats: {}, damage: {} };
       const ctx: ApplyContext = { ...ctxBase, data: item };
-      const effs = processSavingThrows(target, item.effects ?? [], round, log, rng, options.charLookup?.(target));
+      const itemSaveDC = 8 + skillScore(source, (item as { rollModifier?: string }).rollModifier, ctxBase.sourceChar);
+      const effs = processSavingThrows(target, item.effects ?? [], round, log, rng, options.charLookup?.(target), itemSaveDC);
       for (const eff of effs) applyEffect(ctx, target, eff, cache);
       if (source.consumables && remaining !== undefined) {
         source.consumables[item.id] = remaining - 1;

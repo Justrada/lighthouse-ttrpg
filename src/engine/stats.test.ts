@@ -36,8 +36,8 @@ describe('calculateDerivedStats', () => {
     const d = calculateDerivedStats(makeCharacter());
     // body 8, mind 6, soul 4
     expect(d.hp).toBe(40); // max(10, 5*8)
-    expect(d.mp).toBe(5);
-    expect(d.sp).toBe(5);
+    expect(d.mp).toBe(9); // 5 + soul(4)
+    expect(d.sp).toBe(11); // 5 + mind(6)
     expect(d.ac).toBe(14); // 10 + max(0, 8-4)
     expect(d.initiative).toBe(0);
     expect(d.physical).toBe(4); // 8-4
@@ -52,8 +52,8 @@ describe('calculateDerivedStats', () => {
   it('applies Enhancement stat bonuses from learned nodes', () => {
     const d = calculateDerivedStats(makeCharacter({ learnedSkills: ['center-0', INNER_HEARTH] }));
     expect(d.hp).toBe(45); // +5
-    expect(d.mp).toBe(10); // +5
-    expect(d.sp).toBe(10); // +5
+    expect(d.mp).toBe(14); // 9 + 5
+    expect(d.sp).toBe(16); // 11 + 5
   });
 
   it('applies equipped-item AC bonus and routes shield AC separately', () => {
@@ -107,7 +107,7 @@ describe('calculateDerivedStats', () => {
 
   it('resourceMaxes mirrors derived hp/mp/sp', () => {
     const c = makeCharacter({ learnedSkills: ['center-0', INNER_HEARTH] });
-    expect(resourceMaxes(c)).toEqual({ hp: 45, mp: 10, sp: 10 });
+    expect(resourceMaxes(c)).toEqual({ hp: 45, mp: 14, sp: 16 });
   });
 });
 

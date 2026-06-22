@@ -45,8 +45,8 @@ From `calculateDerivedStats` (`stats.ts:193`). `bonus` = the sum of matching **M
 | Derived value | Formula | Status |
 |---|---|---|
 | **HP** (max) | `max(10, 5 × Body) + bonus` | ✅ |
-| **MP** (max) | `5 + Soul + bonus` | 🔧 *(code: flat `5 + bonus`)* |
-| **SP** (max) | `5 + Mind + bonus` | 🔧 *(code: flat `5 + bonus`)* |
+| **MP** (max) | `5 + Soul + bonus` | ✅ |
+| **SP** (max) | `5 + Mind + bonus` | ✅ |
 | **AC** | `10 + max(0, Body − 4) + bonusAC + shield` | ✅ |
 | **Initiative** | `0 + bonus` | ✅ |
 | **Actions / round** | `max(1, 3 + bonus)` | ✅ |
@@ -102,7 +102,7 @@ Tier = prerequisite hops from Core (`getSkillTiers`). The visual editor places e
 | 5–6 | 3 |
 | 7+ | 4 |
 
-### 3.4 Recommended level-1 array 🔧 *(guidance / Quick-Build default)*
+### 3.4 Recommended level-1 array ✅ *(guidance, shown in the Forge)*
 
 A suggested starting spread, not enforced: **one core stat at 6, two at 4** (costs 6+4+4 = 14 of 15 points), leaving 1 for a tier-1 skill. Players may distribute freely and **may leave skills negative**. This is guidance for the Forge / Quick Build, not a hard rule.
 
@@ -162,7 +162,7 @@ A move travels up to **6 hexes** (`MOVE_RANGE`, tunable), pathing around occupie
 
 **Combat is simultaneous.** The atomic unit is a **declared action**, not a whole-combatant turn. Each round runs **Declare → Resolve → End-of-round**.
 
-**Per-action initiative (🔧 partly to-build):**
+**Per-action initiative** ✅:
 1. A combatant with *N* actions rolls **N initiative dice** (`1d20 + Initiative` each).
 2. Their own N rolls are sorted **descending and assigned to their actions in declared order** — so their **1st chosen action gets their highest roll** and reliably resolves before their own later actions.
 3. **All actions from all combatants** are slotted into one timeline by **descending initiative**.
@@ -170,19 +170,19 @@ A move travels up to **6 hexes** (`MOVE_RANGE`, tunable), pathing around occupie
 
 > This interleaving is the selling point: your moves get slotted in amongst everyone else's and the round plays out together.
 >
-> *Code today (`combat.ts:1220`): each action gets an independent d20 (not sorted/assigned in declared order), and ties break by declaration order rather than a reroll. To-build: per-combatant descending assignment + reroll tie-break.*
+> ✅ Implemented in `rollInitiativeForRound` (`combat.ts`): per-combatant rolls assigned to actions in declared order, a global descending interleave, and a per-combatant reroll to break cross-combatant ties.
 
 **End of round** (`combat.ts:1812`) ✅: apply DoT, tick durations, drop Guard, revert expired Max-pool buffs, increment the round.
 
-### 6.5 Action economy ✅ *(except Flee/Chase, 🔧)*
+### 6.5 Action economy ✅
 
 Base **3 actions per round** (modifiable by effects). Each declared action is one slot.
 
 | Action | Cost | Effect | Status |
 |---|---|---|---|
 | **Move** | 1 | up to 6 hexes | ✅ |
-| **Chase** | 1 | move to the reachable open hex **closest to** a chosen target | 🔧 new |
-| **Flee** | 1 | move to the reachable open hex **furthest from** a chosen target | 🔧 *(code: generic move variant)* |
+| **Chase** | 1 | move to the reachable open hex **closest to** a chosen target | ✅ |
+| **Flee** | 1 | move to the reachable open hex **furthest from** a chosen target | ✅ |
 | **Weapon Attack** | 1 | attack with equipped weapon; **no resource cost**; may use ammo; can burst (§6.15) | ✅ |
 | **Use Ability** | 1 | use a learned ability; **pays its MP/SP/HP cost** | ✅ |
 | **Use Item** | 1 | consume one charge of a backpack consumable | ✅ |
@@ -191,7 +191,7 @@ Base **3 actions per round** (modifiable by effects). Each declared action is on
 | **Change Equipment** | 1 | swap equipped weapon | ✅ |
 | **Pass** | 1 | do nothing | ✅ |
 
-**Forced movement (fear / provoke):** effects can compel a target to take a **Flee** (away from the source) or **Chase** (toward the source) move on the target's action — i.e. a fear spell forces the enemy to flee you; a provoke forces them to chase you. Built on the same step-toward / step-away pathing as Move Target (§6.10). 🔧 to-build.
+**Forced movement (fear / provoke):** effects can compel a target to take a **Flee** (away from the source) or **Chase** (toward the source) move on the target's action — i.e. a fear spell forces the enemy to flee you; a provoke forces them to chase you. Built on the same step-toward / step-away pathing as Move Target (§6.10). ✅ The **Flee/Chase actions exist**; a GM enacts fear/provoke by ordering the affected unit to Flee or Chase. (An automatic "compelled" status that forces this on the unit's own turn is a future add.)
 
 > Action-cap note: `actionsPerRound` is enforced when *declaring* (UI/network); the resolver runs whatever's queued (GM-authoritative table — fine). §10.
 
@@ -218,12 +218,12 @@ final         = apply target's resistance/immunity by damage type
 - **Damage straight to HP**, clamped so HP never drops below 0. HP-protecting *Substitute Cost* can divert overflow to another pool down to 1 HP.
 - **Unarmed / fallback damage = 1d4** (tunable).
 
-**Damage types & mitigation 🔧 to-build** *(hooks `damageType`, `weaknesses` exist but are inert today):*
+**Damage types & mitigation** ✅ *(reads `effect.damageType`; resist/immune gathered from the character + equipped items):*
 - Every damage instance carries a **damage type** (e.g. bludgeoning / slashing / piercing + system-defined elemental types).
 - A target can **resist** a type → takes **half** (×0.5, rounded down), or be **immune** → takes **none** (×0). (Optional future extension: **vulnerable** → ×2 via the existing `weaknesses` hook — not required by the current ruling.)
 - Resistances/immunities come from gear, enhancements, or creature templates.
 
-**Crits 🔧 to-build** *(code today: nat-20 only, and doubles the whole total incl. flat mods):*
+**Crits** ✅:
 - **Threshold:** crit on a **natural 20** by default. Enhancements can **lower the threshold** (crit on 19, or 18, etc.) via a per-combatant `critThreshold`.
 - **Base crit = double the DICE** — roll/realize the damage dice twice; **flat modifiers are added once** (e.g. `2d6+3` crit = `2d6 doubled + 3`, *not* `(2d6+3)×2`).
 - **Enhancement variant — Maximum-dice crit:** instead of doubling, a crit deals the **maximum** possible on every die rolled (+ the flat modifier once). This is an opt-in enhancement, not the base rule.
@@ -232,7 +232,7 @@ final         = apply target's resistance/immunity by damage type
 ### 6.8 Saving throws — `processSavingThrows` (`combat.ts:1162`)
 Target rolls `1d20 + named skill` vs the effect's **DC**; one roll per skill group; nat 20 always saves, nat 1 always fails. On success: `saveOutcome: 'Halve'` halves the effect; otherwise it's negated. Advantage on saves comes from effects.
 
-- **DC = 8 + the caster's relevant skill score** (so stronger casters are harder to resist), with an optional **author-set flat DC** override. 🔧 to-build *(code today: flat authored DC only).*
+- **DC = 8 + the caster's relevant skill score** (so stronger casters are harder to resist), with an optional **author-set flat DC** override. ✅
 
 ### 6.9 Guard ✅
 A **Guard** marks the combatant for one round; the next attacker targeting them as primary takes disadvantage, and the Guard is consumed. Clears at end of round.
@@ -287,7 +287,7 @@ A "System" can reskin terms and **add abilities/weapons/skill-tree nodes** that 
 | Dial | Value | Where |
 |---|---|---|
 | HP floor / per-Body | 10 / ×5 | `stats.ts:204` |
-| MP / SP | 5 + Soul / 5 + Mind | `stats.ts` (🔧) |
+| MP / SP | 5 + Soul / 5 + Mind | `stats.ts` |
 | Base AC / Body threshold | 10 / 4 | `stats.ts:207` |
 | Base actions/round | 3 | `stats.ts:216` |
 | Level-1 points / per level | 15 / +10 | `stats.ts:307` |
@@ -295,7 +295,7 @@ A "System" can reskin terms and **add abilities/weapons/skill-tree nodes** that 
 | Range bands | Melee 1 / Near 2 / Far 4 / Distant 6 | `RANGE_TO_HEX_DISTANCE` |
 | Rest | short +50% MP/SP · long full | `REST_RULES` |
 | Unarmed / fallback damage | 1d4 | `combat.ts:880` |
-| Crit threshold (default) | nat 20 (lowerable by enhancement) | `combat.ts` (🔧) |
+| Crit threshold (default) | nat 20 (lowerable by enhancement) | `combat.ts` |
 | Max shots per burst / dice per roll | 20 / 1000 | `combat.ts`, `dice.ts` |
 | Death-save threshold | 5 / 5 | `combat.ts:800` |
 | Marketplace fee | 15% | `WORLDFORGE_FEE_RATE` |
@@ -320,17 +320,19 @@ A "System" can reskin terms and **add abilities/weapons/skill-tree nodes** that 
 - **J — Action-cap enforcement:** keep advisory (UI-only) on a GM-authoritative table? (Leaning yes.)
 - **K — Studio coverage:** which advanced verbs to expose next (Stun, saving throws, passive Enhancements are highest value)?
 
-## 11. Implementation status — the build gap
+## 11. Implementation status — ✅ shipped 2026-06-22
 
-Settled rules whose code doesn't match yet (the to-do that these decisions create):
+All settled rules are implemented (306 tests; an adversarial 4-agent sweep found and fixed one latent initiative bug — see below):
 
-1. **MP/SP formulas** → add Soul/Mind to the flat 5 (`stats.ts`). *Small.*
-2. **Damage types + resist/immune** → `computeDamage`/application reads a damage type and a target's resist/immune map; wire the `damageType`/`weaknesses` hooks + data (`combat.ts`, item/template data). *Medium.*
-3. **Crit overhaul** → double **dice** not total; per-combatant `critThreshold`; max-dice crit enhancement (`combat.ts:885`, `computeDamage`). *Medium.*
-4. **Save DC = 8 + caster skill** (with override) (`combat.ts` save path). *Small.*
-5. **Initiative** → per-combatant descending assignment to declared-order actions + reroll tie-break (`combat.ts:1220`). *Medium.*
-6. **Flee (away) + Chase (toward)** actions + fear/provoke forced moves (`combat.ts` resolveFlee + new resolveChase, reuse `hex.ts` step/closest helpers). *Medium.*
-7. **Recommended array** in Quick Build / Forge guidance (`autobuild.ts` + UI). *Small.*
+1. **MP/SP formulas** — `5 + Soul` / `5 + Mind` (`stats.ts`). ✅
+2. **Damage types + resist/immune** — `applyResistance` by `effect.damageType`; `deriveResistances` gathers from character + items (`combat.ts`). ✅
+3. **Crit overhaul** — `rollDamageNotation` doubles the dice (or maximizes them); per-combatant `critThreshold` via `rollD20`; `deriveCritProfile` reads `Crit Threshold` / `Crit Mode` enhancements (`combat.ts`, `dice.ts`). ✅
+4. **Save DC = 8 + caster skill** (authored `saveDC` overrides) — `processSavingThrows` `dcOf` (`combat.ts`). ✅
+5. **Initiative** — per-combatant ordered assignment + reroll tie-break in `rollInitiativeForRound` (`combat.ts`). ✅
+6. **Flee (away) + Chase (toward)** — `resolveFlee` / `resolveChase` + the `Chase` action type + menu options (`combat.ts`, `actionOptions.ts`). ✅
+7. **Recommended array** — guidance hint in the Forge `StatsSection`; negative skills already supported. ✅
+
+**Bug-check fix:** `rollInitiativeForRound` previously read `declaredActions` by `peerId` first (the app keys it by `id`), so a `peerId`↔`id` collision could hijack or fabricate a combatant's actions — now id-only, locked by a regression test.
 
 ### Resolved cleanup
 ✅ **Effect field names unified (2026-06-22).** The `SkillEffect` type and the effect-text renderer (`effectText.ts`) now read the exact names the engine acts on — `saveSkill`/`saveDC`/`saveOutcome`, `advDis`/`targetSkill`, `direction`/`rows`, `resourceGained`/`resourceDrained`, `resourceDrainedFromTarget`. The dead aliases (`savingThrowSkill`, `advantageType`, `moveDirection`, `substituteFrom/To`, …) are gone, so what a player reads can no longer diverge from what the engine does (locked by `effectText.test.ts`).

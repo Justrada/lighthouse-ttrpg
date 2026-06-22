@@ -202,8 +202,8 @@ export function calculateDerivedStats(character: Character): DerivedStats {
 
   return {
     hp: Math.max(10, 5 * body) + b.hp,
-    mp: 5 + b.mp,
-    sp: 5 + b.sp,
+    mp: 5 + soul + b.mp,
+    sp: 5 + mind + b.sp,
     ac: 10 + Math.max(0, body - 4) + b.ac + b.shield,
     shield: b.shield,
     initiative: 0 + b.initiative,

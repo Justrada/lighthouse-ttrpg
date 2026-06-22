@@ -37,6 +37,13 @@ export interface Combatant {
   currentMP: number;
   currentSP: number;
   ac: number;
+  /** Damage types taken at half (resist) or zero (immune); compared case-insensitively. */
+  resist?: string[];
+  immune?: string[];
+  /** Lowest natural d20 that crits (default 20); enhancements can drop it to 19/18. */
+  critThreshold?: number;
+  /** How a crit scales damage: double the dice (default) or maximize them. */
+  critMode?: 'double-dice' | 'max-dice';
   portraitSeed?: string;
   statusEffects: ActiveStatusEffect[];
   isUnconscious: boolean;
@@ -48,6 +55,7 @@ export interface Combatant {
 
 export type ActionType =
   | 'Move'
+  | 'Chase'
   | 'Guard'
   | 'Use Ability'
   | 'Weapon Attack'

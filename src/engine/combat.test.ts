@@ -81,8 +81,8 @@ describe('createCombatant', () => {
   it('derives max resources, AC, and a default origin position', () => {
     const c = createCombatant(makeCharacter(), { team: 'player' });
     expect(c.maxHP).toBe(40);
-    expect(c.maxMP).toBe(5);
-    expect(c.maxSP).toBe(5);
+    expect(c.maxMP).toBe(9); // 5 + soul(4)
+    expect(c.maxSP).toBe(11); // 5 + mind(6)
     expect(c.ac).toBe(14);
     expect(c.position).toEqual({ q: 0, r: 0 }); // caller assigns real placement
     expect(c.equippedWeaponId).toBeUndefined();

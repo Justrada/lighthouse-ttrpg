@@ -9,6 +9,7 @@ import {
   Footprints,
   Shield,
   ChevronRight,
+  Crosshair,
   Replace,
   RotateCw,
   X,
@@ -28,6 +29,7 @@ export interface StagedActionsProps {
 
 const typeIcon: Record<ActionType, JSX.Element> = {
   Move: <Footprints className="h-3.5 w-3.5" />,
+  Chase: <Crosshair className="h-3.5 w-3.5" />,
   Guard: <Shield className="h-3.5 w-3.5" />,
   'Use Ability': <Sparkles className="h-3.5 w-3.5" />,
   'Weapon Attack': <Swords className="h-3.5 w-3.5" />,

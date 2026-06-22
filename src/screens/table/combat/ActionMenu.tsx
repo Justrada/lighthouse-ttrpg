@@ -7,6 +7,7 @@ import {
   Footprints,
   Shield,
   ChevronRight,
+  Crosshair,
   X,
   Replace,
   RotateCw,
@@ -41,6 +42,7 @@ export interface ActionMenuProps {
 
 const typeIcon: Record<ActionType, JSX.Element> = {
   Move: <Footprints className="h-4 w-4" />,
+  Chase: <Crosshair className="h-4 w-4" />,
   Guard: <Shield className="h-4 w-4" />,
   'Use Ability': <Sparkles className="h-4 w-4" />,
   'Weapon Attack': <Swords className="h-4 w-4" />,

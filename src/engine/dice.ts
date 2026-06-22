@@ -119,6 +119,8 @@ export function rollD20(
   mode: AdvantageMode = 'normal',
   modifier = 0,
   rng: Rng = Math.random,
+  /** Lowest natural die that counts as a crit (default 20; enhancements lower it). */
+  critThreshold = 20,
 ): DiceRollResult {
   const a = rollDie(20, rng);
 
@@ -139,7 +141,7 @@ export function rollD20(
   }
 
   const crit: 'success' | 'fail' | null =
-    kept === 20 ? 'success' : kept === 1 ? 'fail' : null;
+    kept >= critThreshold ? 'success' : kept === 1 ? 'fail' : null;
 
   const result: DiceRollResult = {
     notation: '1d20',

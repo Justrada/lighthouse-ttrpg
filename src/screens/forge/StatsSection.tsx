@@ -50,6 +50,12 @@ export function StatsSection() {
 
   return (
     <div className="space-y-6">
+      <p className="rounded-xl border border-line/60 bg-void/30 px-3 py-2 text-xs text-ink-muted">
+        <span className="font-medium text-ink">New character?</span> A solid level-1 start is one
+        core stat at <span className="font-mono text-beam-soft">6</span> and the other two at{' '}
+        <span className="font-mono text-beam-soft">4</span>. Skills may sit negative — that's an
+        intentional tradeoff, not an error.
+      </p>
       <div className="grid gap-3">
         {(Object.keys(STAT_META) as CoreStatKey[]).map((stat) => {
           const value = draft.coreStats[stat];

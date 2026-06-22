@@ -31,7 +31,7 @@ export interface ActionOption {
   supportive?: boolean;
 }
 
-const ALWAYS_ACTION_TYPES: ActionType[] = ['Move', 'Guard', 'Pass', 'Flee'];
+const ALWAYS_ACTION_TYPES: ActionType[] = ['Move', 'Chase', 'Guard', 'Pass', 'Flee'];
 
 function abilityCost(cost?: { type: string; value: number }): string | undefined {
   if (!cost) return undefined;
@@ -68,6 +68,15 @@ export function buildActionOptions(character: Character | null | undefined): Act
     needsTarget: false,
     needsLine: true,
     description: 'Shift toward or away from the enemy line.',
+  });
+  options.push({
+    key: 'chase',
+    actionType: 'Chase',
+    label: 'Chase',
+    needsTarget: true,
+    needsLine: false,
+    supportive: false,
+    description: 'Close in on a chosen target — move to the nearest open hex beside it.',
   });
   options.push({
     key: 'guard',
@@ -205,9 +214,10 @@ export function buildActionOptions(character: Character | null | undefined): Act
     key: 'flee',
     actionType: 'Flee',
     label: 'Flee',
-    needsTarget: false,
+    needsTarget: true,
     needsLine: false,
-    description: 'Attempt to disengage and escape the battle.',
+    supportive: false,
+    description: 'Bolt to the open hex furthest from a chosen foe.',
   });
   options.push({
     key: 'pass',

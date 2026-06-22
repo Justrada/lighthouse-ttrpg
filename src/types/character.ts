@@ -60,6 +60,9 @@ export interface Character {
   learnedSkills: string[];
   skillChoices?: Record<string, SkillChoice[]>;
   inventory: Inventory;
+  /** Innate damage types resisted (half) / immune to (none) — e.g. for creatures. */
+  resist?: string[];
+  immune?: string[];
   currentHP: number;
   currentMP: number;
   currentSP: number;
