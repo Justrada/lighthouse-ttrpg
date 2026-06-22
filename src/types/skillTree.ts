@@ -21,35 +21,41 @@ export interface SkillEffect {
   id: string;
   type: EffectType | string;
 
+  // Field names below match what the engine (combat.ts) and the effect-text
+  // renderer actually read, so display and resolution never diverge.
+
   // --- Apply Damage ---
   savingThrowEnabled?: boolean;
-  savingThrowSkill?: string;
-  savingThrowDC?: number | string;
-  saveForHalf?: boolean;
+  saveSkill?: string;
+  saveDC?: number | string;
+  saveOutcome?: string; // e.g. 'Negate' | 'Halve'
   useWeaponDamage?: boolean;
   weaponMultiplier?: number;
   additionalDamage?: string;
   damageType?: string;
+  // Drain sub-mode: steal a resource from the target and replenish the source.
   drainResourceEnabled?: boolean;
-  drainResource?: ResourceType;
+  resourceDrainedFromTarget?: ResourceType;
+  resourceReplenishedToSelf?: string; // a ResourceType, or 'Half'
 
   // --- Modify Stat / Healing ---
   statToModify?: string;
   modification?: string;
   durationType?: 'Instant' | 'Rounds' | 'Actions' | 'Permanent';
+  durationUnit?: 'Rounds' | 'Actions' | 'Permanent';
   durationValue?: number;
 
   // --- Give Advantage/Disadvantage ---
-  advantageType?: 'Advantage' | 'Disadvantage';
-  appliesTo?: string;
+  advDis?: 'Advantage' | 'Disadvantage';
+  targetSkill?: string; // the roll type it applies to, e.g. 'Attack Roll'
 
   // --- Move Target ---
-  moveDirection?: 'Push' | 'Pull';
-  moveDistance?: number;
+  direction?: string; // 'Towards' | 'Away From'
+  rows?: number; // hexes to move
 
   // --- Substitute Cost ---
-  substituteFrom?: ResourceType;
-  substituteTo?: ResourceType;
+  resourceGained?: ResourceType; // the cost-resource being substituted for
+  resourceDrained?: ResourceType; // the resource actually spent instead
 
   /** Tolerate any additional fields present in the source data. */
   [key: string]: unknown;

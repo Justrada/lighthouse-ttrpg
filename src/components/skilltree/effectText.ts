@@ -53,13 +53,13 @@ export function describeEffect(effect: SkillEffect, chosen?: string): string {
       let line = `Deal ${parts.join(' + ') || 'damage'}`;
       if (effect.damageType) line += ` ${String(effect.damageType).toLowerCase()} damage`;
       else if (parts.length) line += ' damage';
-      if (effect.savingThrowEnabled && effect.savingThrowSkill) {
-        line += ` — ${effect.savingThrowSkill} save`;
-        if (effect.savingThrowDC != null) line += ` (DC ${effect.savingThrowDC})`;
-        if (effect.saveForHalf) line += ', half on success';
+      if (effect.savingThrowEnabled && effect.saveSkill) {
+        line += ` — ${effect.saveSkill} save`;
+        if (effect.saveDC != null) line += ` (DC ${effect.saveDC})`;
+        if (effect.saveOutcome === 'Halve') line += ', half on success';
       }
-      if (effect.drainResourceEnabled && effect.drainResource) {
-        line += `, drains ${effect.drainResource}`;
+      if (effect.drainResourceEnabled && effect.resourceDrainedFromTarget) {
+        line += `, drains ${effect.resourceDrainedFromTarget}`;
       }
       return line;
     }
@@ -84,19 +84,19 @@ export function describeEffect(effect: SkillEffect, chosen?: string): string {
       return `Stun the target${durationText(effect)}`;
 
     case 'Give Advantage/Disadvantage': {
-      const mode = effect.advantageType ?? 'Advantage';
-      const on = effect.appliesTo ? ` on ${effect.appliesTo}` : '';
+      const mode = effect.advDis ?? 'Advantage';
+      const on = effect.targetSkill ? ` on ${effect.targetSkill}` : '';
       return `Grant ${mode}${on}${durationText(effect)}`;
     }
 
     case 'Move Target': {
-      const dir = effect.moveDirection ?? 'Push';
-      const dist = effect.moveDistance != null ? ` ${effect.moveDistance}` : '';
+      const dir = effect.direction ?? 'Push';
+      const dist = effect.rows != null ? ` ${effect.rows}` : '';
       return `${dir} the target${dist}`;
     }
 
     case 'Substitute Cost':
-      return `Pay ${effect.substituteTo ?? '?'} in place of ${effect.substituteFrom ?? '?'}`;
+      return `Pay ${effect.resourceDrained ?? '?'} in place of ${effect.resourceGained ?? '?'}`;
 
     default:
       return type;

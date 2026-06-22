@@ -332,5 +332,5 @@ Settled rules whose code doesn't match yet (the to-do that these decisions creat
 6. **Flee (away) + Chase (toward)** actions + fear/provoke forced moves (`combat.ts` resolveFlee + new resolveChase, reuse `hex.ts` step/closest helpers). *Medium.*
 7. **Recommended array** in Quick Build / Forge guidance (`autobuild.ts` + UI). *Small.*
 
-### Known code cleanup (not a rules decision)
-The `SkillEffect` **type** lists field aliases the engine doesn't read (`savingThrowSkill`, `moveDirection`, `substituteFrom`, `advantageType`, …); base data + engine agree on the real names (`saveSkill`, `direction`, `resourceGained`, `advDis`, …). Reconcile the type so custom/imported content can't use a dead alias.
+### Resolved cleanup
+✅ **Effect field names unified (2026-06-22).** The `SkillEffect` type and the effect-text renderer (`effectText.ts`) now read the exact names the engine acts on — `saveSkill`/`saveDC`/`saveOutcome`, `advDis`/`targetSkill`, `direction`/`rows`, `resourceGained`/`resourceDrained`, `resourceDrainedFromTarget`. The dead aliases (`savingThrowSkill`, `advantageType`, `moveDirection`, `substituteFrom/To`, …) are gone, so what a player reads can no longer diverge from what the engine does (locked by `effectText.test.ts`).
