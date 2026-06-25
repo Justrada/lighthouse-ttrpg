@@ -15,6 +15,7 @@ import { normalizeCharacter } from '@/lib/character';
 import { normalizeCombatState } from '@/lib/combat';
 import { normalizeWorldpackContent } from '@/lib/worldpack';
 import { setActiveCatalog, buildActiveCatalog } from '@/data/skillTree';
+import { logger } from '@/lib/logger';
 import type { SystemBaseMode } from '@/types';
 
 export interface PendingCheck {
@@ -54,8 +55,11 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         case 'message':
           try {
             route(e.from, e.message, transport);
-          } catch {
-            /* never let a malformed message crash the session */
+          } catch (err) {
+            // Never let a malformed message crash the session — but don't swallow
+            // it silently either, or a desync is invisible and undebuggable in prod.
+            logger.error('session', `failed to route inbound "${e.message?.type ?? 'message'}"`, err);
+            useUIStore.getState().pushToast({ title: 'A table update was dropped', tone: 'danger' });
           }
           break;
         case 'error':
@@ -173,7 +177,9 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
       }
       case 'party_sync':
         set({
-          party: msg.payload.members.map((m) => {
+          // Guard the array: a malformed party_sync (missing/!array members) must
+          // not throw out of the handler and silently drop the whole update.
+          party: (Array.isArray(msg.payload?.members) ? msg.payload.members : []).map((m) => {
             // Normalize each member like every other peer-data boundary, so a
             // malformed member can't crash PartyPanel via calculateDerivedStats.
             const character = normalizeCharacter(m.character);

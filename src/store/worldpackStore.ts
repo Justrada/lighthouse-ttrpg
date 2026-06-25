@@ -5,6 +5,7 @@ import type { WorldpackStore } from './contracts';
 import { loadJSON, saveJSON, KEYS } from './persistence';
 import { normalizeWorldpack } from '@/lib/worldpack';
 import { setActiveCatalog, buildActiveCatalog } from '@/data/skillTree';
+import { logger } from '@/lib/logger';
 
 function loadPacks(): Worldpack[] {
   const raw = loadJSON<unknown[]>(KEYS.worldpacks, []);
@@ -121,7 +122,8 @@ export const useWorldpackStore = create<WorldpackStore>()((set, get) => ({
     if (typeof raw === 'string') {
       try {
         parsed = JSON.parse(raw);
-      } catch {
+      } catch (err) {
+        logger.warn('worldpack', 'import failed — not valid JSON', err);
         return null;
       }
     }
