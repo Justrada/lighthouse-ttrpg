@@ -48,7 +48,9 @@ export function DiceResult({
   hideNotation = false,
   className,
 }: DiceResultProps) {
-  const { notation, rolls, modifier, total, d20, advantage, discarded, crit } =
+  // Defensive defaults: a malformed roll entry (e.g. an unvalidated inbound
+  // `dice_roll` payload) must never crash the feed render via `rolls.map`/`reduce`.
+  const { notation, rolls = [], modifier = 0, total = 0, d20, advantage, discarded, crit } =
     result;
   const sides = sidesFromNotation(notation, d20);
   const isCritSuccess = crit === 'success';

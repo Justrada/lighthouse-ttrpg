@@ -180,11 +180,11 @@ const DEFAULT_DERIVED: DerivedStats = {
 
 /**
  * Compute a character's derived stats from core stats plus all learned
- * Enhancement and equipped-item bonuses. Formulas are ported verbatim from the
- * original `calculateDerivedStats`:
+ * Enhancement and equipped-item bonuses. Current formulas (MP/SP scale with
+ * Soul/Mind per the 2026 rules update — see docs/RULES.md §2.2):
  *
  * - hp = max(10, 5*body) + bonus
- * - mp = 5 + bonus, sp = 5 + bonus
+ * - mp = 5 + soul + bonus, sp = 5 + mind + bonus
  * - ac = 10 + max(0, body-4) + bonusAc + bonusShield
  * - initiative = bonus
  * - skills derive from core-stat sums (see body), each plus its bonus
