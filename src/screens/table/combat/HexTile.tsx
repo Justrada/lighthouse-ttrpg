@@ -78,13 +78,17 @@ export const HexTile = memo(function HexTile({
   const h = 2 * size; // pointy-top height
   const points = hexPoints(size);
 
+  // Rock reads as raised mass — LIGHTER than the floor, not darker. Sinking it
+  // toward the background made it near-invisible against a translucent floor
+  // tile, which is the worst outcome: the engine blocks the hex while the board
+  // shows open ground.
   const fill = solid
-    ? 'rgba(24,32,52,0.96)'
+    ? 'rgba(52,68,104,0.92)'
     : tint
       ? tintFill[tint]
       : 'rgba(14,22,38,0.55)';
   const stroke = solid
-    ? 'rgba(58,76,116,0.9)'
+    ? 'rgba(104,126,178,0.95)'
     : hovered
       ? 'rgba(255,212,121,0.85)'
       : tint
