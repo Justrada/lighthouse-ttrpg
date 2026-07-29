@@ -88,6 +88,8 @@ export {
 // Combat
 export {
   createCombatant,
+  OCCUPIES,
+  resetLogSequence,
   actionSlotsFor,
   isTargetInRange,
   getAOETargets,

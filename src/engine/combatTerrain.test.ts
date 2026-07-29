@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { Battlefield, Combatant, CombatState, ResolvedAction, SkillNode } from '@/types';
-import { isTargetInRange, resolveAction } from './combat';
+import { isTargetInRange, resolveAction, resetLogSequence } from './combat';
 import { compileTerrain, edgeId, hexKey } from './hex';
 import { setActiveCatalog, buildActiveCatalog, resetActiveCatalog } from '@/data/skillTree';
 
@@ -49,6 +49,24 @@ const move = (sourceId: string, targetHex: { q: number; r: number }): ResolvedAc
 });
 
 const posOf = (state: CombatState, id: string) => state.combatants.find((c) => c.id === id)!.position;
+
+describe('engine log ids are deterministic', () => {
+  it('replaying the same action twice produces identical log ids', () => {
+    // The engine used to mix Math.random into every log id, which made "combat
+    // is deterministic given a seed" quietly untrue — a bad foundation for a
+    // sold map whose whole verification story is reproducibility.
+    const hero = mkCombatant({ id: 'hero', position: at(0, 0) });
+    const state = mkState([hero]);
+    resetLogSequence();
+    const a = resolveAction(state, move('hero', at(4, 0))).log.map((l) => l.id);
+    resetLogSequence();
+    const b = resolveAction(state, move('hero', at(4, 0))).log.map((l) => l.id);
+
+    expect(a.length).toBeGreaterThan(0);
+    expect(b).toEqual(a);
+    expect(a[0]).toMatch(/^log_\d+_\d+$/);
+  });
+});
 
 describe('battlefield dimensions', () => {
   it('confines movement to a custom battlefield rather than the default arena', () => {

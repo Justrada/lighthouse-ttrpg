@@ -146,10 +146,29 @@ function pushLog(
   tone?: CombatLogEntry['tone'],
 ): void {
   _logSeq += 1;
-  // `ts` is left at 0 to keep the engine deterministic; callers (the store/UI)
-  // can stamp wall-clock time on ingest if they want chronological ordering.
-  log.push({ id: `log_${_logSeq}_${Math.random().toString(36).slice(2, 8)}`, round, text, tone, ts: 0 });
+  // `ts` is left at 0 and the id is derived from a counter, not `Math.random`,
+  // so a replayed round produces byte-identical output. "The engine is
+  // deterministic" has to be true without an asterisk once a sold map's
+  // verification story is built on top of it.
+  log.push({ id: `log_${round}_${_logSeq}`, round, text, tone, ts: 0 });
 }
+
+/** Reset the log-id counter — called when a fresh combat begins so ids restart
+ *  from a known point rather than drifting up across a whole session. */
+export function resetLogSequence(): void {
+  _logSeq = 0;
+}
+
+/**
+ * Whether a combatant occupies its hex for movement purposes.
+ *
+ * One predicate, imported everywhere, because three call sites used to disagree:
+ * the engine let a mover walk *onto* an unconscious body (`currentHP > 0`) while
+ * the store and the board both blocked it (`!isDead`) — and the board's
+ * hex→combatant map is last-writer-wins, so the stacked unit simply vanished.
+ * A downed body still blocks; a corpse doesn't.
+ */
+export const OCCUPIES = (c: { isDead: boolean }): boolean => !c.isDead;
 
 const find = (state: CombatState, id?: string | null): Combatant | undefined =>
   id ? state.combatants.find((c) => c.id === id) : undefined;
@@ -628,7 +647,7 @@ function moveTarget(
 
   const occupied = (h: HexCoord): boolean =>
     state.combatants.some(
-      (c) => c.id !== target.id && c.id !== source.id && c.currentHP > 0 && hexEquals(c.position, h),
+      (c) => c.id !== target.id && c.id !== source.id && OCCUPIES(c) && hexEquals(c.position, h),
     );
 
   if (direction === 'Towards' && hexDistance(target.position, source.position) <= 1) {
@@ -1426,7 +1445,7 @@ export function rollInitiativeForRound(
 function blockedBy(state: CombatState, mover: Combatant): (h: HexCoord) => boolean {
   return (h: HexCoord) =>
     state.combatants.some(
-      (c) => c.id !== mover.id && c.currentHP > 0 && hexEquals(c.position, h),
+      (c) => c.id !== mover.id && OCCUPIES(c) && hexEquals(c.position, h),
     );
 }
 

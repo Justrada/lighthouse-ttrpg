@@ -44,6 +44,9 @@ export interface Battlefield {
   zones?: { player: HexCoord[]; npc: HexCoord[] };
   /** Human-readable origin, e.g. "The Salt Lantern — common room". */
   label?: string;
+  /** Where this arena was compiled from, when it came from an atlas. Plain
+   *  strings so this module stays independent of the atlas types. */
+  origin?: { atlasId: string; path: string; genMajor: number };
 }
 
 export interface Combatant {
@@ -146,6 +149,10 @@ export interface CombatState {
   /** The space this fight happens in. Absent ⇒ the default open arena
    *  (`BATTLE_GRID`), which is what every fight not staged from a map gets. */
   battlefield?: Battlefield;
+  /** Which party group is fighting, when the party has split. Absent ⇒ the
+   *  whole party. Carried from the start so running two fights at once later is
+   *  a store change rather than a protocol change. */
+  groupId?: string;
   combatants: Combatant[];
   /** combatantId -> declared actions for the round. */
   declaredActions: Record<string, DeclaredAction[]>;

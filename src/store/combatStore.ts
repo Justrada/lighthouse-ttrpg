@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import type {
+  Battlefield,
   Character,
   Combatant,
   CombatState,
@@ -8,7 +9,15 @@ import type {
   DeclaredAction,
 } from '@/types';
 import type { CombatStore } from './contracts';
-import { resolveRound, processEndOfRound, deployHexes, gridHexes, actionSlotsFor } from '@/engine';
+import {
+  resolveRound,
+  processEndOfRound,
+  deployHexes,
+  gridHexes,
+  actionSlotsFor,
+  resetLogSequence,
+  OCCUPIES,
+} from '@/engine';
 import { CONDITIONS, BATTLE_GRID } from '@/data/constants';
 import { useSessionStore } from './sessionStore';
 import { useRosterStore } from './rosterStore';
@@ -63,7 +72,8 @@ function broadcast(combat: CombatState) {
  * the positions are written back in order. This fixes the default `{q:0,r:0}`
  * collision that occurs when combatants are created without an explicit hex.
  */
-function placeCombatants(combatants: Combatant[]): Combatant[] {
+function placeCombatants(combatants: Combatant[], battlefield?: Battlefield): Combatant[] {
+  const dims = battlefield?.dims ?? BATTLE_GRID;
   const byTeam: Record<Combatant['team'], Combatant[]> = { player: [], npc: [] };
   for (const c of combatants) byTeam[c.team].push(c);
 
@@ -71,7 +81,9 @@ function placeCombatants(combatants: Combatant[]): Combatant[] {
   const used = new Set<string>();
   (Object.keys(byTeam) as Combatant['team'][]).forEach((team) => {
     const team_members = byTeam[team];
-    const hexes = deployHexes(team, team_members.length, BATTLE_GRID);
+    // A map-derived arena nominates its own zones (the two entrances of a ruin,
+    // opposite banks of a ford); without them the classic midline rows apply.
+    const hexes = deployHexes(team, team_members.length, dims, battlefield?.zones);
     team_members.forEach((c, i) => {
       const hex = hexes[i];
       if (hex) {
@@ -82,12 +94,17 @@ function placeCombatants(combatants: Combatant[]): Combatant[] {
   });
 
   // Overflow past a team's deploy capacity would otherwise stack at {0,0}; give
-  // any leftover combatant the next free hex anywhere on the grid.
-  const allHexes = gridHexes(BATTLE_GRID);
+  // any leftover combatant the next free hex anywhere on the grid — skipping
+  // solid terrain, or the spillover lands inside a pillar.
+  const solid = new Set(battlefield?.solid ?? []);
+  const allHexes = gridHexes(dims);
   return combatants.map((c) => {
     let hex = positionFor.get(c.id);
     if (!hex) {
-      hex = allHexes.find((h) => !used.has(`${h.q},${h.r}`));
+      hex = allHexes.find((h) => {
+        const k = `${h.q},${h.r}`;
+        return !used.has(k) && !solid.has(k);
+      });
       if (hex) used.add(`${hex.q},${hex.r}`);
     }
     return hex ? { ...c, position: hex } : c;
@@ -158,15 +175,21 @@ function slotCountFor(combatantId: string, combatants: Combatant[]): number {
 export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
   combat: emptyCombat(),
 
-  startCombat: (combatants) => {
-    const placed = placeCombatants(uniquifyCombatantIds(combatants));
+  startCombat: (combatants, battlefield, groupId) => {
+    resetLogSequence();
+    const placed = placeCombatants(uniquifyCombatantIds(combatants), battlefield);
+    const where = battlefield?.label ? ` — ${battlefield.label}` : '';
     const combat: CombatState = {
       ...emptyCombat(),
       isActive: true,
       phase: 'setup',
       round: 1,
+      ...(battlefield ? { battlefield } : {}),
+      ...(groupId ? { groupId } : {}),
       combatants: placed,
-      log: [logEntry(1, '⚔️ Combat staged. Position your combatants, then begin the round.', 'beam')],
+      log: [
+        logEntry(1, `⚔️ Combat staged${where}. Position your combatants, then begin the round.`, 'beam'),
+      ],
     };
     set({ combat });
     if (isGM()) useSessionStore.getState().send({ type: 'combat_start', payload: { combat, seq: nextSeq() } });
@@ -186,7 +209,7 @@ export const useCombatStore = create<CombatStoreImpl>()((set, get) => ({
     const cur = get().combat;
     if (cur.phase === 'resolving') return;
     const occupied = cur.combatants.some(
-      (c) => c.id !== combatantId && !c.isDead && c.position.q === hex.q && c.position.r === hex.r,
+      (c) => c.id !== combatantId && OCCUPIES(c) && c.position.q === hex.q && c.position.r === hex.r,
     );
     if (occupied) return;
     set({
