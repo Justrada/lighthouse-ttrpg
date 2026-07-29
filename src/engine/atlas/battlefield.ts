@@ -127,12 +127,19 @@ function borders(dims: GridDims): { a: HexCoord; b: HexCoord; dir: number }[] {
 }
 
 /**
- * Hexes reachable from `start`, honouring walls, doors, and solid cells.
- * Used to prove the generated arena has no isolated pockets.
+ * Hexes **structurally** reachable from `start` — blocked by walls and solid
+ * terrain, but **not** by a shut door.
+ *
+ * A closed door is a door: someone opens it. Treating it as a barrier here would
+ * make the generator declare every room behind one "stranded" and fill it with
+ * rock, which is exactly the bug this comment replaces — a tavern whose back
+ * rooms turned to solid stone because the spanning tree happened to roll a
+ * closed door. Moment-to-moment passability is a different question, and the
+ * engine already answers it via `compileTerrain` + `reachableHexes`.
  */
 export function reachableFrom(start: HexCoord, field: Battlefield): Set<string> {
   const walls = new Set(field.walls ?? []);
-  const doors = new Map(Object.entries(field.doors ?? {}).map(([k, v]) => [Number(k), v]));
+  const doors = new Set(Object.keys(field.doors ?? {}).map(Number));
   const solid = new Set(field.solid ?? []);
   const seen = new Set<string>([hexKey(start)]);
   const queue: HexCoord[] = [start];
@@ -140,9 +147,7 @@ export function reachableFrom(start: HexCoord, field: Battlefield): Set<string> 
     const c = queue.pop()!;
     for (let d = 0; d < 6; d += 1) {
       const id = edgeId(c, d);
-      if (walls.has(id)) continue;
-      const door = doors.get(id);
-      if (door !== undefined && door !== 'open') continue;
+      if (walls.has(id) && !doors.has(id)) continue;
       const n = { q: c.q + HEX_DIRECTIONS[d].q, r: c.r + HEX_DIRECTIONS[d].r };
       const k = hexKey(n);
       if (seen.has(k) || !inBounds(n, dims_(field)) || solid.has(k)) continue;
