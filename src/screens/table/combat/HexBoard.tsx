@@ -9,6 +9,8 @@ import {
   hexEquals,
   reachableHexes,
   isTargetInRange,
+  compileTerrain,
+  OCCUPIES,
 } from '@/engine';
 import { useCombatStore } from '@/store';
 import { BATTLE_GRID, MOVE_RANGE } from '@/data/constants';
@@ -21,6 +23,7 @@ import {
   type ActionOption,
 } from '../shared/actionOptions';
 import { HexTile, type HexTileTint } from './HexTile';
+import { BattlefieldOverlay, solidKeys } from './BattlefieldOverlay';
 import { BoardToken } from './CombatantToken';
 import { ActionMenu, type ActionMenuItem } from './ActionMenu';
 
@@ -38,6 +41,8 @@ const BASE_SIZE = 40;
 const PIECE_RATIO = 1.7;
 /** Pointer travel (px) before a press becomes a drag instead of a click. */
 const DRAG_THRESHOLD = 6;
+/** How far a small arena may be magnified to fill its container. */
+const MAX_BOARD_SCALE = 2.5;
 
 /** Who is resolving right now (for the active glow + glide emphasis). */
 function useActiveResolutionId(): string | undefined {
@@ -91,6 +96,7 @@ export function HexBoard({
 }: HexBoardProps) {
   const combatants = useCombatStore((s) => s.combat.combatants);
   const phase = useCombatStore((s) => s.combat.phase);
+  const battlefield = useCombatStore((s) => s.combat.battlefield);
   const declareAction = useCombatStore((s) => s.declareAction);
   const placeCombatant = useCombatStore((s) => s.placeCombatant);
   const activeResolutionId = useActiveResolutionId();
@@ -102,6 +108,12 @@ export function HexBoard({
   const dragRef = useRef<DragState | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const planeRef = useRef<HTMLDivElement>(null);
+
+  // The arena this fight happens in — its own size and structure when it came
+  // from a map, otherwise the default open rectangle.
+  const dims = battlefield?.dims ?? BATTLE_GRID;
+  const terrain = useMemo(() => compileTerrain(battlefield), [battlefield]);
+  const solid = useMemo(() => solidKeys(battlefield), [battlefield]);
 
   const actor = useMemo(
     () => combatants.find((c) => c.id === activeActorId) ?? null,
@@ -138,8 +150,11 @@ export function HexBoard({
   const canDrag = controllable && (isSetup || isDeclare) && !isResolving;
 
   // Layout: flat pixel centers for every hex, normalized to a 0-based box.
+  // Depends on `dims` — an empty dep array here silently pinned the board to
+  // whatever geometry it computed first, which is invisible until an arena
+  // changes size.
   const layout = useMemo(() => {
-    const hexes = gridHexes(BATTLE_GRID);
+    const hexes = gridHexes(dims);
     const raw = hexes.map((h) => ({ hex: h, px: hexToPixel(h, BASE_SIZE) }));
     const xs = raw.map((r) => r.px.x);
     const ys = raw.map((r) => r.px.y);
@@ -157,30 +172,33 @@ export function HexBoard({
     }));
     const centerByKey = new Map(cells.map((c) => [hexKey(c.hex), c.center]));
     return { cells, width, height, centerByKey };
-  }, []);
+  }, [dims]);
 
   // Occupancy: a hex is blocked for movement if a live combatant stands on it.
   const occupiedByOther = useMemo(() => {
     const keys = new Set<string>();
     for (const c of combatants) {
       if (c.id === activeActorId) continue;
-      if (c.isDead) continue; // corpses don't block; downed bodies still do
+      if (!OCCUPIES(c)) continue; // corpses don't block; downed bodies still do
       keys.add(hexKey(c.position));
     }
     return keys;
   }, [combatants, activeActorId]);
 
-  // Reachable tiles for the active actor (declare phase only).
+  // Reachable tiles for the active actor (declare phase only). Passing
+  // `terrain` is what keeps the highlight honest: without it the board would
+  // offer tiles through walls that the engine then refuses to move to.
   const reachableKeys = useMemo(() => {
     if (!declareInteractive || !actor) return new Set<string>();
     const reach = reachableHexes(
       actor.position,
       MOVE_RANGE,
       (c) => occupiedByOther.has(hexKey(c)),
-      BATTLE_GRID,
+      dims,
+      terrain,
     );
     return new Set(reach.map(hexKey));
-  }, [declareInteractive, actor, occupiedByOther]);
+  }, [declareInteractive, actor, occupiedByOther, dims, terrain]);
 
   // Close the menu when interaction context changes out from under it.
   useEffect(() => {
@@ -203,7 +221,9 @@ export function HexBoard({
     if (!el) return;
     const measure = () => {
       const avail = el.clientWidth;
-      const next = Math.min(1, avail / layout.width);
+      // Magnify as well as shrink: a 10x8 tavern should fill the container, not
+      // sit as a postage stamp in the middle of a wide screen.
+      const next = Math.min(MAX_BOARD_SCALE, avail / layout.width);
       setScale(Number.isFinite(next) && next > 0 ? next : 1);
     };
     measure();
@@ -261,7 +281,9 @@ export function HexBoard({
           (isSelf || !opt.needsTarget
             ? true
             : opt.range
-              ? isTargetInRange(actor, target, opt.range)
+              ? // Same call the resolver makes, terrain included — otherwise the
+                // menu offers a target behind a wall that the engine refuses.
+                isTargetInRange(actor, target, opt.range, terrain)
               : true); // no range band (e.g. a thrown consumable) → always reachable
         return {
           option: opt,
@@ -446,21 +468,39 @@ export function HexBoard({
             />
 
             {/* Tiles */}
-            {layout.cells.map(({ hex, center, i }) => (
-              <HexTile
-                key={hexKey(hex)}
-                hex={hex}
-                center={center}
+            {layout.cells.map(({ hex, center, i }) => {
+              const isSolid = solid.has(hexKey(hex));
+              return (
+                <HexTile
+                  key={hexKey(hex)}
+                  hex={hex}
+                  center={center}
+                  size={BASE_SIZE}
+                  tint={tintFor(hex)}
+                  solid={isSolid}
+                  interactive={
+                    tilesInteractive && !isSolid && !combatantByHex.has(hexKey(hex))
+                  }
+                  hovered={hovered != null && hexEquals(hovered, hex)}
+                  onHexClick={handleTileClick}
+                  onHexHover={setHovered}
+                  reducedMotion={reduced}
+                  delayStep={i}
+                />
+              );
+            })}
+
+            {/* Walls and doors — one overlay above the tiles, below the tokens,
+                so a shared border is drawn once rather than by both neighbours. */}
+            {battlefield && (
+              <BattlefieldOverlay
+                field={battlefield}
+                centerByKey={layout.centerByKey}
                 size={BASE_SIZE}
-                tint={tintFor(hex)}
-                interactive={tilesInteractive && !combatantByHex.has(hexKey(hex))}
-                hovered={hovered != null && hexEquals(hovered, hex)}
-                onHexClick={handleTileClick}
-                onHexHover={setHovered}
-                reducedMotion={reduced}
-                delayStep={i}
+                width={layout.width}
+                height={layout.height}
               />
-            ))}
+            )}
 
             {/* Tokens — upright pieces; glide on position change; draggable in setup. */}
             {combatants.map((c) => {

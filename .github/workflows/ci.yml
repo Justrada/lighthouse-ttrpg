@@ -1,0 +1,41 @@
+name: CI
+
+# Pushes to main deploy straight to the live game, so the gate has to sit on the
+# pull request — by the time a bad commit reaches main, it is already shipping.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Same build the deploy workflow runs, including the base path, so a
+      # PR cannot pass here and then fail on the way to production.
+      - name: Build
+        run: npm run build
+        env:
+          VITE_BASE_PATH: /lighthouse-ttrpg/

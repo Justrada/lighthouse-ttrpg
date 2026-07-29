@@ -6,6 +6,7 @@
  * from inside the stores, never directly from screens.
  */
 import type {
+  Battlefield,
   Character,
   DerivedStats,
   SkillPointBudget,
@@ -98,7 +99,10 @@ export interface SessionStore {
 
 export interface CombatStore {
   combat: CombatState;
-  startCombat: (combatants: Combatant[]) => void;
+  /** Stage a fight. `battlefield` supplies a map-derived arena (its own size,
+   *  walls, and deploy zones); omitting it uses the default open rectangle.
+   *  `groupId` names the party group fighting, for a split party. */
+  startCombat: (combatants: Combatant[], battlefield?: Battlefield, groupId?: string) => void;
   /** Leave the GM setup/placement phase and begin round 1's declarations. */
   beginRound: () => void;
   /** GM places a combatant on a hex (setup placement + free repositioning). */

@@ -140,7 +140,25 @@ Nodes + directed edges (prerequisite → unlocked) + linked world items. Exactly
 ## 6. Combat
 
 ### 6.1 Battlefield ✅
-Pointy-top hex grid **18 × 14** (tunable). One combatant per hex. Teams deploy near the midline with a gap; the GM repositions during setup.
+Pointy-top hex grid **18 × 14** by default (tunable). One combatant per hex. Teams deploy near the midline with a gap; the GM repositions during setup.
+
+**A fight can instead happen in a *place*.** `CombatState.battlefield` (optional) carries the arena's own `dims`, its structure, and its deployment zones — this is what a map-derived encounter supplies. Absent ⇒ the default open rectangle above, unchanged.
+
+### 6.1a Walls, doors & line of sight ✅ *(inert unless a battlefield supplies them)*
+
+**Walls sit on the border *between* two hexes, not on a hex.** A wall therefore costs no standable ground — a seven-room interior is ~100 edge records instead of ~93 of the board's 252 hexes. It also gives doors the right arity: an edge door joins exactly two hexes, where a door *hex* would open in six directions.
+
+| Rule | Effect |
+|---|---|
+| **Wall** | Blocks movement and sight across that one border, from both sides. |
+| **Door** | An `open` door is as if the border weren't there; `closed` and `locked` block movement and sight. (Opening one is GM narration for now.) |
+| **Solid hex** | A pillar, pit, or deep water — impassable, but does not block sight. |
+| **Line of sight** | A target you cannot see cannot be attacked, targeted by an ability, or caught in an AOE — **regardless of range**, including `Battlefield`. `Self` is a team check and is never gated by geometry. |
+| **Forced movement** | A shove or pull stops at a wall exactly as it stops at the board edge. |
+
+LOS is deliberately **permissive**: it is granted if the line is clear in *either* direction. The underlying hex-line rounding isn't symmetric (8 of 31,626 hex pairs on an 18×14 board disagree about who can see whom), and players forgive "they shouldn't have seen me" far more readily than "I can't shoot the thing I'm looking at."
+
+> On an open field none of this applies and the engine short-circuits it entirely, so a fight with no battlefield resolves exactly as it always has.
 
 ### 6.2 Range bands — `RANGE_TO_HEX_DISTANCE` (tunable) ✅
 
@@ -292,6 +310,7 @@ A "System" can reskin terms and **add abilities/weapons/skill-tree nodes** that 
 | Base actions/round | 3 | `stats.ts:216` |
 | Level-1 points / per level | 15 / +10 | `stats.ts:307` |
 | Grid / move range | 18×14 / 6 | `constants.ts` |
+| Max arena accepted off the wire | 200×200 | `normalizeBattlefield` (`lib/combat.ts`) |
 | Range bands | Melee 1 / Near 2 / Far 4 / Distant 6 | `RANGE_TO_HEX_DISTANCE` |
 | Rest | short +50% MP/SP · long full | `REST_RULES` |
 | Unarmed / fallback damage | 1d4 | `combat.ts:880` |

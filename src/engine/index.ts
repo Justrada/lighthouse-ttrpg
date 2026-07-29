@@ -73,9 +73,23 @@ export {
   type GridDims,
 } from './hex';
 
+// Battlefield structure — walls live on the borders between hexes, not on hexes
+export {
+  dirIndex,
+  edgeId,
+  compileTerrain,
+  edgeBlocks,
+  hexIsSolid,
+  hasLineOfSight,
+  EDGE_COORD_LIMIT,
+  type Terrain,
+} from './hex';
+
 // Combat
 export {
   createCombatant,
+  OCCUPIES,
+  resetLogSequence,
   actionSlotsFor,
   isTargetInRange,
   getAOETargets,

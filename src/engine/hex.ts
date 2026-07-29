@@ -4,17 +4,16 @@
  * Coordinates are axial `{q, r}`. All functions here are pure and deterministic;
  * they back both the engine's positioning rules and the isometric board's layout.
  */
-import type { HexCoord } from '@/types';
+import type { HexCoord, GridDims, Battlefield, DoorState } from '@/types';
 
-export interface GridDims {
-  cols: number;
-  rows: number;
-}
+export type { GridDims };
 
 export const hexKey = (c: HexCoord): string => `${c.q},${c.r}`;
 export const hexEquals = (a: HexCoord, b: HexCoord): boolean => a.q === b.q && a.r === b.r;
 
-/** The six axial neighbor directions (pointy-top). */
+/** The six axial neighbor directions (pointy-top). Ordered so that direction `d`
+ *  and direction `(d + 3) % 6` are exact opposites — the edge-ownership scheme
+ *  below depends on that pairing. */
 export const HEX_DIRECTIONS: readonly HexCoord[] = [
   { q: 1, r: 0 },
   { q: 1, r: -1 },
@@ -24,8 +23,136 @@ export const HEX_DIRECTIONS: readonly HexCoord[] = [
   { q: 0, r: 1 },
 ];
 
+/** The direction index from `from` to an adjacent `to`, or -1 if not adjacent. */
+export function dirIndex(from: HexCoord, to: HexCoord): number {
+  const dq = to.q - from.q;
+  const dr = to.r - from.r;
+  for (let i = 0; i < 6; i += 1) {
+    if (HEX_DIRECTIONS[i].q === dq && HEX_DIRECTIONS[i].r === dr) return i;
+  }
+  return -1;
+}
+
 export function hexNeighbors(c: HexCoord): HexCoord[] {
   return HEX_DIRECTIONS.map((d) => ({ q: c.q + d.q, r: c.r + d.r }));
+}
+
+// ---------------------------------------------------------------------------
+// Hex edges — where walls live
+// ---------------------------------------------------------------------------
+
+/**
+ * The greatest magnitude an axial coordinate may reach and still get a unique
+ * {@link edgeId}. A battlefield that wide would hold ~1M hexes, so this is far
+ * beyond any real board; it exists so the packing has a stated contract.
+ *
+ * The packed fields are twice this wide, which matters: naming an edge first
+ * normalizes to the hex that *owns* it, and that can step one hex further out
+ * than the caller's own coordinate. The headroom means a hex at the very limit
+ * still resolves without wrapping into a different edge's id.
+ */
+export const EDGE_COORD_LIMIT = 512;
+const EDGE_FIELD_BIAS = EDGE_COORD_LIMIT * 2;
+
+/**
+ * A stable integer id for the border between two adjacent hexes.
+ *
+ * Each hex **owns** three of its six edges — directions 0, 1, 2 (E, NE, NW) —
+ * and delegates the other three to the neighbour on that side, which owns the
+ * same border from its own perspective. Because `HEX_DIRECTIONS` is ordered so
+ * `opposite(d) === (d + 3) % 6`, normalizing a high direction is just "step to
+ * the neighbour, then subtract 3". Both hexes therefore agree on one id, which
+ * is what lets a wall be stored once and block movement in both directions.
+ *
+ * The result is a plain number (not a string) because this sits in the innermost
+ * loop of every pathfinding call, where a `Set<number>` probe beats allocating a
+ * key string per neighbour.
+ */
+export function edgeId(c: HexCoord, direction: number): number {
+  let q = c.q;
+  let r = c.r;
+  let side = direction;
+  if (side >= 3) {
+    const v = HEX_DIRECTIONS[side];
+    q += v.q;
+    r += v.r;
+    side -= 3;
+  }
+  return ((q + EDGE_FIELD_BIAS) << 14) | ((r + EDGE_FIELD_BIAS) << 3) | side;
+}
+
+/**
+ * A {@link Battlefield}'s structure compiled into lookups the engine can probe
+ * in constant time. Built once per resolution by {@link compileTerrain}; the
+ * wire/persisted form stays plain JSON-safe arrays.
+ */
+export interface Terrain {
+  walls: ReadonlySet<number>;
+  doors: ReadonlyMap<number, DoorState>;
+  solid: ReadonlySet<string>;
+}
+
+/**
+ * Compile a {@link Battlefield}'s JSON arrays into {@link Terrain} lookups.
+ * Returns `undefined` for a battlefield with no structure at all, so every
+ * downstream check short-circuits on a plain open arena.
+ */
+export function compileTerrain(field: Battlefield | undefined): Terrain | undefined {
+  if (!field) return undefined;
+  const walls = new Set<number>();
+  for (const w of field.walls ?? []) if (Number.isFinite(w)) walls.add(w);
+  const doors = new Map<number, DoorState>();
+  for (const [k, state] of Object.entries(field.doors ?? {})) {
+    const id = Number(k);
+    if (Number.isFinite(id)) doors.set(id, state);
+  }
+  const solid = new Set<string>(field.solid ?? []);
+  if (walls.size === 0 && doors.size === 0 && solid.size === 0) return undefined;
+  return { walls, doors, solid };
+}
+
+/**
+ * Whether the border on `direction` from `hex` stops movement or sight. A wall
+ * always blocks; a door blocks unless it is open.
+ */
+export function edgeBlocks(terrain: Terrain | undefined, hex: HexCoord, direction: number): boolean {
+  if (!terrain) return false;
+  const id = edgeId(hex, direction);
+  if (terrain.walls.has(id)) return true;
+  const door = terrain.doors.get(id);
+  return door !== undefined && door !== 'open';
+}
+
+/** Whether a whole hex is impassable terrain (a pillar, a pit, deep water). */
+export function hexIsSolid(terrain: Terrain | undefined, hex: HexCoord): boolean {
+  return terrain ? terrain.solid.has(hexKey(hex)) : false;
+}
+
+/**
+ * Whether `a` can see `b` — false when a wall (or a shut door) lies across the
+ * hex line between them.
+ *
+ * Deliberately **permissive**: {@link hexLineDraw}'s rounding is not symmetric,
+ * so A can have line of sight to B while B does not have it back to A. Rather
+ * than pick an arbitrary winner we check both directions and grant sight if
+ * either path is clear — players forgive "they shouldn't have seen me" far more
+ * readily than "I can't shoot the thing I'm looking at".
+ */
+export function hasLineOfSight(a: HexCoord, b: HexCoord, terrain: Terrain | undefined): boolean {
+  if (!terrain || terrain.walls.size + terrain.doors.size === 0) return true;
+  return clearPath(a, b, terrain) || clearPath(b, a, terrain);
+}
+
+function clearPath(from: HexCoord, to: HexCoord, terrain: Terrain): boolean {
+  const path = hexLineDraw(from, to);
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const d = dirIndex(path[i], path[i + 1]);
+    // A line that skips a hex can't be checked edge-by-edge; treat it as clear
+    // here and let the other direction decide.
+    if (d < 0) continue;
+    if (edgeBlocks(terrain, path[i], d)) return false;
+  }
+  return true;
 }
 
 /** Number of single-step moves between two hexes. */
@@ -133,12 +260,32 @@ export function gridHexes(dims: GridDims): HexCoord[] {
 }
 
 /**
- * Distinct starting hexes for a team, centered horizontally and placed a few rows
- * to either side of the midline (players below, enemies above) — leaving an open
- * gap between the lines instead of pinning them to the back rows. The GM can drag
- * everyone elsewhere during the setup phase. Returns exactly `count` hexes.
+ * Distinct starting hexes for a team.
+ *
+ * With explicit `zones` — which a map-derived battlefield supplies, nominating
+ * e.g. the two entrances of a ruin — the team simply draws from its own list.
+ * That is the only workable answer on an irregular map, where the midline rows
+ * may lie inside a wall or outside the cave entirely.
+ *
+ * Without them, the classic geometry applies: centered horizontally, a few rows
+ * to either side of the midline (players below, enemies above), leaving an open
+ * gap between the lines rather than pinning them to the back rows. Note this
+ * reserves up to 8 rows, which is most of a small board — another reason a
+ * generated interior should nominate its own zones. The GM can drag everyone
+ * elsewhere during the setup phase.
+ *
+ * Returns at most `count` hexes (fewer only when a supplied zone is smaller than
+ * the team; the caller places any overflow).
  */
-export function deployHexes(team: 'player' | 'npc', count: number, dims: GridDims): HexCoord[] {
+export function deployHexes(
+  team: 'player' | 'npc',
+  count: number,
+  dims: GridDims,
+  zones?: Battlefield['zones'],
+): HexCoord[] {
+  const zone = zones?.[team];
+  if (zone && zone.length > 0) return zone.slice(0, count).map((h) => ({ q: h.q, r: h.r }));
+
   const mid = Math.floor(dims.rows / 2);
   // Two-row gap around the midline; rows fan outward from there if more are needed.
   const rows =
@@ -164,15 +311,21 @@ export function hexToPixel(c: HexCoord, size: number): { x: number; y: number } 
 }
 
 /**
- * Open hexes reachable from `from` within `maxSteps`, respecting grid bounds and
- * a `blocked` predicate (e.g. hexes occupied by other combatants). Excludes
+ * Open hexes reachable from `from` within `maxSteps`, respecting grid bounds, a
+ * `blocked` predicate (e.g. hexes occupied by other combatants), and — when a
+ * battlefield has structure — walls, shut doors, and solid hexes. Excludes
  * `from` itself.
+ *
+ * `blocked` and `terrain` answer different questions on purpose: a *body*
+ * blocks a hex, a *wall* blocks a border. Omitting `terrain` gives exactly the
+ * open-arena behaviour the game has always had.
  */
 export function reachableHexes(
   from: HexCoord,
   maxSteps: number,
   blocked: (c: HexCoord) => boolean,
   dims: GridDims,
+  terrain?: Terrain,
 ): HexCoord[] {
   const seen = new Set<string>([hexKey(from)]);
   const out: HexCoord[] = [];
@@ -180,9 +333,15 @@ export function reachableHexes(
   for (let step = 0; step < maxSteps; step += 1) {
     const next: HexCoord[] = [];
     for (const c of frontier) {
-      for (const n of hexNeighbors(c)) {
+      // Walk directions by index rather than via hexNeighbors: naming the edge
+      // between two hexes requires the direction, which the neighbour list drops.
+      for (let d = 0; d < 6; d += 1) {
+        if (edgeBlocks(terrain, c, d)) continue;
+        const v = HEX_DIRECTIONS[d];
+        const n = { q: c.q + v.q, r: c.r + v.r };
         const k = hexKey(n);
         if (seen.has(k) || !inBounds(n, dims) || blocked(n)) continue;
+        if (terrain?.solid.has(k)) continue;
         seen.add(k);
         out.push(n);
         next.push(n);
@@ -204,10 +363,11 @@ export function closestReachableTo(
   maxSteps: number,
   blocked: (c: HexCoord) => boolean,
   dims: GridDims,
+  terrain?: Terrain,
 ): HexCoord {
   let best = from;
   let bestD = hexDistance(from, goal);
-  for (const c of reachableHexes(from, maxSteps, blocked, dims)) {
+  for (const c of reachableHexes(from, maxSteps, blocked, dims, terrain)) {
     const d = hexDistance(c, goal);
     if (d < bestD) {
       bestD = d;

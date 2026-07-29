@@ -81,9 +81,14 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
         combat.combat.combatants.some((c) => c.id === id && c.peerId === from);
       switch (msg.type) {
         case 'player_join': {
+          // Complete the handshake. The greeting is what lets a joiner reset its
+          // snapshot watermark: this GM's outbound sequence counter starts at 0,
+          // and a player carrying a high watermark from a previous host process
+          // would otherwise drop every snapshot for the rest of the session.
+          transport.send(from, { type: 'hello', payload: { role: 'gm', name: get().selfName } });
           // Bring the joiner's resolver registry in line with the GM's active
-          // System FIRST (before party/combat data) so custom content resolves
-          // for them — and so a joiner who lacks the pack can still play it.
+          // System (before party/combat data) so custom content resolves for
+          // them — and so a joiner who lacks the pack can still play it.
           transport.send(from, systemSyncMessage());
           const character = normalizeCharacter(msg.payload.character);
           set((s) => {
@@ -164,6 +169,13 @@ export const useSessionStore = create<SessionStoreImpl>()((set, get) => {
 
     // --- player role: GM is authoritative ---
     switch (msg.type) {
+      case 'hello':
+        // A GM greeting means a fresh host process, and the host's outbound
+        // sequence counter restarts at 0 with it. Without re-baselining, a
+        // player who still holds a high watermark from before the GM reloaded
+        // silently drops every snapshot for the rest of the session.
+        if (msg.payload?.role === 'gm') lastRxSeq = -1;
+        break;
       case 'system_sync': {
         // The GM's active System is authoritative for the session. Build the same
         // catalog locally so our action menus / sheet / combat resolve identically

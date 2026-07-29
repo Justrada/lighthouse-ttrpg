@@ -97,6 +97,10 @@
     color: theme('colors.arcane.soft');
     text-shadow: 0 0 18px rgba(45, 212, 191, 0.5);
   }
+  .text-glow-mystic {
+    color: theme('colors.mystic.soft');
+    text-shadow: 0 0 18px rgba(167, 139, 250, 0.5);
+  }
 
   /* Animated gradient border for featured cards */
   .lh-ring {
