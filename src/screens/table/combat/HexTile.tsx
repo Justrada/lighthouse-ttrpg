@@ -23,6 +23,8 @@ export interface HexTileProps {
   reducedMotion?: boolean;
   /** Stagger seed (row+col) so the floor shimmers in like a wave. */
   delayStep?: number;
+  /** Impassable terrain — rock, a pit, deep water. Reads as mass, not floor. */
+  solid?: boolean;
 }
 
 /** Pointy-top hexagon vertices for a given radius, as an SVG points string. */
@@ -70,17 +72,24 @@ export const HexTile = memo(function HexTile({
   onHexHover,
   reducedMotion = false,
   delayStep = 0,
+  solid = false,
 }: HexTileProps) {
   const w = Math.sqrt(3) * size; // pointy-top width
   const h = 2 * size; // pointy-top height
   const points = hexPoints(size);
 
-  const fill = tint ? tintFill[tint] : 'rgba(14,22,38,0.55)';
-  const stroke = hovered
-    ? 'rgba(255,212,121,0.85)'
+  const fill = solid
+    ? 'rgba(24,32,52,0.96)'
     : tint
-      ? tintStroke[tint]
-      : 'rgba(46,63,100,0.6)';
+      ? tintFill[tint]
+      : 'rgba(14,22,38,0.55)';
+  const stroke = solid
+    ? 'rgba(58,76,116,0.9)'
+    : hovered
+      ? 'rgba(255,212,121,0.85)'
+      : tint
+        ? tintStroke[tint]
+        : 'rgba(46,63,100,0.6)';
 
   return (
     <motion.svg

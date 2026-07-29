@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Swords, Check, Plus, UserPlus, Skull, Users, BookOpen, Heart, Shield } from 'lucide-react';
+import { nanoid } from 'nanoid';
+import { Swords, Check, Plus, UserPlus, Skull, Users, BookOpen, Heart, Shield, Dices } from 'lucide-react';
 import type { Character, Combatant, PartyMember, Team } from '@/types';
-import { Modal, Button, Avatar, Badge, EmptyState, Divider, NumberStepper, Tabs, SegmentedControl } from '@/components/ui';
+import { Modal, Button, Avatar, Badge, EmptyState, Divider, NumberStepper, Tabs, SegmentedControl, Input } from '@/components/ui';
 import { useRosterStore, useCombatStore, useUIStore } from '@/store';
 import { createCombatant, calculateDerivedStats } from '@/engine';
+import { compileBattlefield, hashPath, type ArenaArchetype } from '@/engine/atlas';
 import { NPC_TEMPLATES, type NpcTemplate } from '@/data/npcTemplates';
 import { cn } from '@/lib/cn';
 
@@ -43,6 +45,23 @@ const TEAM_OPTIONS: { value: Team; label: string }[] = [
   { value: 'player', label: 'Ally' },
 ];
 
+/** Where the fight happens. `field` = the classic open rectangle. */
+type ArenaChoice = 'field' | ArenaArchetype;
+
+const ARENA_OPTIONS: { value: ArenaChoice; label: string }[] = [
+  { value: 'field', label: 'Open field' },
+  { value: 'open', label: 'Broken ground' },
+  { value: 'interior', label: 'Interior' },
+  { value: 'cave', label: 'Cave' },
+];
+
+const ARENA_BLURB: Record<ArenaChoice, string> = {
+  field: 'The classic 18×14 arena — no walls, no cover.',
+  open: 'Scattered boulders and copses for cover. Always fully traversable.',
+  interior: 'Rooms and doors. Walls block movement and line of sight.',
+  cave: 'A carved cavern with an uneven rim and solid rock.',
+};
+
 /**
  * GM combat setup: pick which connected players join the fray (team 'player')
  * and stage other units — either from the saved roster or the drop-in bestiary,
@@ -64,6 +83,32 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
   const [rosterTeams, setRosterTeams] = useState<Record<string, Team>>({});
   const [bestiaryTeams, setBestiaryTeams] = useState<Record<string, Team>>({});
   const [foeTab, setFoeTab] = useState<FoeTab>('roster');
+  const [arena, setArena] = useState<ArenaChoice>('field');
+  const [arenaSeed, setArenaSeed] = useState('');
+
+  // The arena is a pure function of (seed, archetype), so the preview a GM
+  // shuffles through is exactly what everyone at the table will play on.
+  const battlefield = useMemo(() => {
+    if (arena === 'field') return undefined;
+    const label = ARENA_OPTIONS.find((o) => o.value === arena)?.label;
+    return compileBattlefield({
+      seed: hashPath([arenaSeed || 'lighthouse']),
+      archetype: arena,
+      label,
+    });
+  }, [arena, arenaSeed]);
+
+  const arenaSummary = useMemo(() => {
+    if (!battlefield) return null;
+    const walls = battlefield.walls?.length ?? 0;
+    const doors = Object.keys(battlefield.doors ?? {}).length;
+    const solid = battlefield.solid?.length ?? 0;
+    const parts = [`${battlefield.dims.cols}×${battlefield.dims.rows}`];
+    if (walls) parts.push(`${walls} wall${walls === 1 ? '' : 's'}`);
+    if (doors) parts.push(`${doors} door${doors === 1 ? '' : 's'}`);
+    if (solid) parts.push(`${solid} blocked`);
+    return parts.join(' · ');
+  }, [battlefield]);
 
   const selectedPlayers = useMemo(
     () => party.filter((m) => players[m.peerId] ?? true),
@@ -147,7 +192,7 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
     }
 
     if (list.length === 0) return;
-    startCombat(list);
+    startCombat(list, battlefield);
     const heroes = selectedPlayers.length + stagedAllies;
     pushToast({
       title: 'Combat begins',
@@ -193,6 +238,47 @@ export function StartCombatModal({ open, onClose, party }: StartCombatModalProps
       }
     >
       <div className="space-y-5">
+        {/* Arena — where the fight happens. */}
+        <section className="space-y-2">
+          <h4 className="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-ink-faint">
+            The Ground
+          </h4>
+          <SegmentedControl<ArenaChoice>
+            value={arena}
+            onChange={setArena}
+            options={ARENA_OPTIONS}
+            size="sm"
+            fullWidth
+            tone="arcane"
+            aria-label="Choose the battlefield"
+          />
+          <p className="text-xs text-ink-muted">{ARENA_BLURB[arena]}</p>
+          {arena !== 'field' && (
+            <div className="flex items-center gap-2">
+              <Input
+                value={arenaSeed}
+                onChange={(e) => setArenaSeed(e.target.value)}
+                placeholder="seed (optional)"
+                className="h-8 flex-1 font-mono text-xs"
+                aria-label="Battlefield seed"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                leftIcon={<Dices className="h-3.5 w-3.5" />}
+                onClick={() => setArenaSeed(nanoid(6))}
+              >
+                Reroll
+              </Button>
+            </div>
+          )}
+          {arenaSummary && (
+            <p className="font-mono text-[0.7rem] text-ink-faint">{arenaSummary}</p>
+          )}
+        </section>
+
+        <Divider label="Who fights" />
+
         {/* Players */}
         <section className="space-y-2">
           <h4 className="text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-ink-faint">

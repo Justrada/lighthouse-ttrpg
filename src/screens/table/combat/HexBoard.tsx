@@ -23,6 +23,7 @@ import {
   type ActionOption,
 } from '../shared/actionOptions';
 import { HexTile, type HexTileTint } from './HexTile';
+import { BattlefieldOverlay, solidKeys } from './BattlefieldOverlay';
 import { BoardToken } from './CombatantToken';
 import { ActionMenu, type ActionMenuItem } from './ActionMenu';
 
@@ -112,6 +113,7 @@ export function HexBoard({
   // from a map, otherwise the default open rectangle.
   const dims = battlefield?.dims ?? BATTLE_GRID;
   const terrain = useMemo(() => compileTerrain(battlefield), [battlefield]);
+  const solid = useMemo(() => solidKeys(battlefield), [battlefield]);
 
   const actor = useMemo(
     () => combatants.find((c) => c.id === activeActorId) ?? null,
@@ -466,21 +468,39 @@ export function HexBoard({
             />
 
             {/* Tiles */}
-            {layout.cells.map(({ hex, center, i }) => (
-              <HexTile
-                key={hexKey(hex)}
-                hex={hex}
-                center={center}
+            {layout.cells.map(({ hex, center, i }) => {
+              const isSolid = solid.has(hexKey(hex));
+              return (
+                <HexTile
+                  key={hexKey(hex)}
+                  hex={hex}
+                  center={center}
+                  size={BASE_SIZE}
+                  tint={tintFor(hex)}
+                  solid={isSolid}
+                  interactive={
+                    tilesInteractive && !isSolid && !combatantByHex.has(hexKey(hex))
+                  }
+                  hovered={hovered != null && hexEquals(hovered, hex)}
+                  onHexClick={handleTileClick}
+                  onHexHover={setHovered}
+                  reducedMotion={reduced}
+                  delayStep={i}
+                />
+              );
+            })}
+
+            {/* Walls and doors — one overlay above the tiles, below the tokens,
+                so a shared border is drawn once rather than by both neighbours. */}
+            {battlefield && (
+              <BattlefieldOverlay
+                field={battlefield}
+                centerByKey={layout.centerByKey}
                 size={BASE_SIZE}
-                tint={tintFor(hex)}
-                interactive={tilesInteractive && !combatantByHex.has(hexKey(hex))}
-                hovered={hovered != null && hexEquals(hovered, hex)}
-                onHexClick={handleTileClick}
-                onHexHover={setHovered}
-                reducedMotion={reduced}
-                delayStep={i}
+                width={layout.width}
+                height={layout.height}
               />
-            ))}
+            )}
 
             {/* Tokens — upright pieces; glide on position change; draggable in setup. */}
             {combatants.map((c) => {
