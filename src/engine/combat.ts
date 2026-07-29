@@ -31,6 +31,10 @@ import {
 } from './effects';
 import {
   closestReachableTo,
+  compileTerrain,
+  dirIndex,
+  edgeBlocks,
+  hasLineOfSight,
   hexDistance,
   hexEquals,
   hexLineDraw,
@@ -38,6 +42,8 @@ import {
   reachableHexes,
   stepAway,
   stepToward,
+  type GridDims,
+  type Terrain,
 } from './hex';
 import type { AdvantageMode } from '@/types';
 
@@ -80,6 +86,27 @@ export interface RoundStep {
 // ---------------------------------------------------------------------------
 // Small pure utilities
 // ---------------------------------------------------------------------------
+
+/**
+ * The arena this fight uses. A fight staged from the atlas carries its own
+ * {@link Battlefield}; every other fight gets the default open rectangle, so
+ * omitting it reproduces the game's original behaviour exactly.
+ */
+function dimsOf(state: CombatState): GridDims {
+  return state.battlefield?.dims ?? BATTLE_GRID;
+}
+
+/**
+ * This arena's walls/doors/solid hexes, compiled for lookup — or `undefined` for
+ * an open field, which short-circuits every structure check downstream.
+ *
+ * Recompiled per call rather than cached: a fully-walled board is ~100 entries,
+ * so this costs microseconds, and a cache would be module state the pure engine
+ * is better off without.
+ */
+function terrainOf(state: CombatState): Terrain | undefined {
+  return compileTerrain(state.battlefield);
+}
 
 /** Structured deep clone of combat state, so resolution never mutates input. */
 function cloneState(state: CombatState): CombatState {
@@ -468,13 +495,16 @@ export function isTargetInRange(
   source: Combatant,
   target: Combatant | undefined,
   range: string | undefined,
+  terrain?: Terrain,
 ): boolean {
   if (!source || !target) return false;
   if (range === 'Self') return target.team === source.team;
   const max = range ? RANGE_TO_HEX_DISTANCE[range] : undefined;
   if (max === undefined) return false;
-  if (max === Infinity) return true;
-  return hexDistance(source.position, target.position) <= max;
+  if (max !== Infinity && hexDistance(source.position, target.position) > max) return false;
+  // Walls beat range: you cannot strike, or shoot, through a wall you can't see
+  // past. On an open field (no terrain) this is always true, so nothing changes.
+  return hasLineOfSight(source.position, target.position, terrain);
 }
 
 /** True when a usable only carries supportive (ally-targeting) effects. */
@@ -536,13 +566,16 @@ export function getAOETargets(
   if (!primary || !aoe || aoe === 'Single Target') return [primary];
 
   const supportive = isSupportive(data);
+  const terrain = terrainOf(state);
   const targets: Combatant[] = [];
 
   // Area effects are team-agnostic: a blast catches allies and enemies alike.
   const eligible = (c: Combatant): boolean => {
     if (c.currentHP <= 0 && !c.isUnconscious) return false; // removed from the fight
     if (!supportive && c.isUnconscious) return false; // damage spares the downed
-    return true;
+    // A blast fills the room it goes off in, not the one next door — anyone the
+    // impact point can't see is behind a wall and is spared.
+    return hasLineOfSight(primary.position, c.position, terrain);
   };
 
   if (aoe.includes('AOE')) {
@@ -590,6 +623,8 @@ function moveTarget(
   distance: number,
 ): MoveOutcome {
   const from = { ...target.position };
+  const dims = dimsOf(state);
+  const terrain = terrainOf(state);
 
   const occupied = (h: HexCoord): boolean =>
     state.combatants.some(
@@ -615,7 +650,14 @@ function moveTarget(
       next = stepAway(cursor, source.position);
     }
     if (hexEquals(next, cursor)) break;
-    if (!inBounds(next, BATTLE_GRID)) {
+    // A shove stops at a wall exactly as it stops at the grid edge — otherwise
+    // forced movement is the one way to put a combatant through solid stone.
+    const d = dirIndex(cursor, next);
+    if (d < 0 || edgeBlocks(terrain, cursor, d)) {
+      blockedReason = 'boundary';
+      break;
+    }
+    if (!inBounds(next, dims) || (terrain && terrain.solid.has(`${next.q},${next.r}`))) {
       blockedReason = 'boundary';
       break;
     }
@@ -1424,7 +1466,14 @@ function resolveMove(
     return;
   }
 
-  const dest = closestReachableTo(source.position, goal, MOVE_RANGE, blocked, BATTLE_GRID);
+  const dest = closestReachableTo(
+    source.position,
+    goal,
+    MOVE_RANGE,
+    blocked,
+    dimsOf(state),
+    terrainOf(state),
+  );
 
   // When approaching a specific combatant, don't end on top of it: if the closest
   // reachable hex is the target's own hex, fall back toward an adjacent hex.
@@ -1464,7 +1513,13 @@ function resolveFlee(
   // nearest safe spot the move allowance can reach, even if it means sidestepping.
   let best = source.position;
   let bestD = hexDistance(source.position, target.position);
-  for (const c of reachableHexes(source.position, MOVE_RANGE, blocked, BATTLE_GRID)) {
+  for (const c of reachableHexes(
+    source.position,
+    MOVE_RANGE,
+    blocked,
+    dimsOf(state),
+    terrainOf(state),
+  )) {
     const d = hexDistance(c, target.position);
     if (d > bestD) {
       bestD = d;
@@ -1500,7 +1555,14 @@ function resolveChase(
   }
 
   const blocked = blockedBy(state, source);
-  const dest = closestReachableTo(source.position, target.position, MOVE_RANGE, blocked, BATTLE_GRID);
+  const dest = closestReachableTo(
+    source.position,
+    target.position,
+    MOVE_RANGE,
+    blocked,
+    dimsOf(state),
+    terrainOf(state),
+  );
   // Don't end on top of the target — fall back to holding if the only closer hex
   // is the target's own.
   const finalDest = hexEquals(dest, target.position) ? source.position : dest;
@@ -1575,9 +1637,14 @@ function resolveUsable(
     return;
   }
 
-  if (!isTargetInRange(source, target, data.range)) {
-    pushLog(log, round, `${source.name} tries to use ${name}, but ${target?.name ?? 'the target'} is out of range.`, 'muted');
-    results.push({ kind: 'info', text: `Out of range`, targetId: target?.id });
+  const terrain = terrainOf(state);
+  if (!isTargetInRange(source, target, data.range, terrain)) {
+    // Distinguish the two failures — "out of range" for a target the caster
+    // simply can't reach, "behind cover" for one a wall is in the way of.
+    const unseen = target != null && !hasLineOfSight(source.position, target.position, terrain);
+    const why = unseen ? 'behind cover' : 'out of range';
+    pushLog(log, round, `${source.name} tries to use ${name}, but ${target?.name ?? 'the target'} is ${why}.`, 'muted');
+    results.push({ kind: 'info', text: unseen ? 'No line of sight' : 'Out of range', targetId: target?.id });
     return;
   }
 
@@ -1825,8 +1892,15 @@ export function resolveAction(
         pushLog(log, round, `${source.name} tries to attack, but ${target.name} is down.`, 'muted');
         break;
       }
-      if (!isTargetInRange(source, target, weapon.range)) {
-        pushLog(log, round, `${source.name} tries to attack, but ${target.name} is out of range.`, 'muted');
+      const attackTerrain = terrainOf(state);
+      if (!isTargetInRange(source, target, weapon.range, attackTerrain)) {
+        const unseen = !hasLineOfSight(source.position, target.position, attackTerrain);
+        pushLog(
+          log,
+          round,
+          `${source.name} tries to attack, but ${target.name} is ${unseen ? 'behind cover' : 'out of range'}.`,
+          'muted',
+        );
         break;
       }
       const usesAmmo = typeof weapon.clipSize === 'number' && weapon.clipSize > 0;
