@@ -224,4 +224,28 @@ describe('robustness across many seeds', () => {
       expect(field.zones?.npc.length).toBeGreaterThan(0);
     }
   });
+
+  it('NEVER turns interior floor into rock, across 60 seeds', () => {
+    // The bug this pins: connectivity pruning used to treat a shut door as a
+    // barrier, so any room the spanning tree happened to gate with a closed
+    // door was declared unreachable and filled with solid stone. A single seed
+    // can easily roll all-open doors and look fine, which is how it shipped.
+    for (let i = 0; i < 60; i += 1) {
+      const field = compileBattlefield({ seed: seedFor(`interior-${i}`), archetype: 'interior' });
+      expect(field.solid ?? []).toEqual([]);
+      expect(openHexes(field).length).toBe(field.dims.cols * field.dims.rows);
+    }
+  });
+
+  it('keeps every room reachable even when every door is shut', () => {
+    for (let i = 0; i < 30; i += 1) {
+      const field = compileBattlefield({ seed: seedFor(`shut-${i}`), archetype: 'interior' });
+      const allShut: Battlefield = {
+        ...field,
+        doors: Object.fromEntries(Object.keys(field.doors ?? {}).map((k) => [k, 'locked' as const])),
+      };
+      const total = allShut.dims.cols * allShut.dims.rows;
+      expect(reachableFrom(openHexes(allShut)[0], allShut).size).toBe(total);
+    }
+  });
 });
