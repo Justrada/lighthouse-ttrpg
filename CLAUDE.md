@@ -35,3 +35,7 @@ One-way layered deps: `types → data → engine → net → store → component
 ## Deploy
 Pushes to `main` auto-deploy to GitHub Pages (`.github/workflows/deploy.yml`).
 Open a PR for review; don't push straight to `main` unless asked.
+
+Every PR into `main` runs `.github/workflows/ci.yml` — typecheck, the full test
+suite, and the same production build the deploy uses. Because main ships on
+merge, the PR is the only place a break can still be caught.
